@@ -1,0 +1,349 @@
+# ============================================================
+# CDM Privacy Gateway — Infrastructure Locale Complète
+# Simule l'environnement de production Crédit du Maroc
+#
+# Auteur  : Roui Anas — PFE EMI MIS 2026 — DSIG CDM
+# Usage   : docker-compose up -d
+# ============================================================
+
+version: "3.8"
+
+# ── RÉSEAU INTERNE ───────────────────────────────────────────
+networks:
+  cdm-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ── VOLUMES PERSISTANTS ──────────────────────────────────────
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  sqlserver-data:
+  nifi-data:
+  nifi-logs:
+  atlas-data:
+  ollama-models:
+
+services:
+
+  # ============================================================
+  # 1. ZOOKEEPER — Coordinateur Kafka
+  # ============================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.3
+    container_name: cdm-zookeeper
+    networks:
+      - cdm-network
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================
+  # 2. KAFKA BROKER — Messagerie temps réel
+  #    Simule le cluster KBS/NKP de CDM
+  # ============================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.3
+    container_name: cdm-kafka
+    networks:
+      - cdm-network
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: >
+        PLAINTEXT:PLAINTEXT,
+        PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: >
+        PLAINTEXT://kafka:29092,
+        PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server",
+             "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================
+  # 3. SCHEMA REGISTRY — Validation des schémas Avro
+  #    Garantit la compatibilité des messages Kafka
+  # ============================================================
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.3
+    container_name: cdm-schema-registry
+    networks:
+      - cdm-network
+    ports:
+      - "8081:8081"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: >
+        kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_KAFKASTORE_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "curl", "-f",
+             "http://localhost:8081/subjects"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================
+  # 4. KAFKA CONNECT — Héberge les connecteurs Debezium
+  #    En production CDM : Debezium SQL Server connector
+  #    En local : prêt à recevoir le connecteur
+  # ============================================================
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:7.5.3
+    container_name: cdm-kafka-connect
+    networks:
+      - cdm-network
+    ports:
+      - "8083:8083"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka:29092
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: cdm-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: _cdm-connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _cdm-connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _cdm-connect-status
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: >
+        io.confluent.kafka.serializers.KafkaAvroSerializer
+      CONNECT_VALUE_CONVERTER: >
+        io.confluent.kafka.serializers.KafkaAvroSerializer
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: >
+        http://schema-registry:8081
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: >
+        http://schema-registry:8081
+      CONNECT_PLUGIN_PATH: >
+        /usr/share/java,/kafka/plugins
+    volumes:
+      - ./docker/kafka-plugins:/kafka/plugins
+    healthcheck:
+      test: ["CMD", "curl", "-f",
+             "http://localhost:8083/connectors"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================
+  # 5. KAFKA UI — Interface web pour surveiller Kafka
+  #    http://localhost:8080
+  # ============================================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: cdm-kafka-ui
+    networks:
+      - cdm-network
+    ports:
+      - "8080:8080"
+    depends_on:
+      - kafka
+      - schema-registry
+    environment:
+      KAFKA_CLUSTERS_0_NAME: cdm-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: >
+        http://schema-registry:8081
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: cdm-connect
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: >
+        http://kafka-connect:8083
+
+  # ============================================================
+  # 6. SQL SERVER — Simule KONDOR+ MSSQL en local
+  #    En production CDM : remplacé par vrai KONDOR+
+  #    CDC sera activé sur cette instance locale
+  # ============================================================
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: cdm-sqlserver
+    networks:
+      - cdm-network
+    ports:
+      - "1433:1433"
+    environment:
+      SA_PASSWORD: "CDM_Local_2026!"
+      ACCEPT_EULA: "Y"
+      MSSQL_AGENT_ENABLED: "true"
+    volumes:
+      - sqlserver-data:/var/opt/mssql
+      - ./docker/sqlserver/init.sql:/init.sql
+    healthcheck:
+      test: ["CMD", "/opt/mssql-tools/bin/sqlcmd",
+             "-S", "localhost",
+             "-U", "sa",
+             "-P", "CDM_Local_2026!",
+             "-Q", "SELECT 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ============================================================
+  # 7. APACHE NIFI — Orchestration des flux de données
+  #    Interface : http://localhost:8443/nifi
+  # ============================================================
+  nifi:
+    image: apache/nifi:1.23.2
+    container_name: cdm-nifi
+    networks:
+      - cdm-network
+    ports:
+      - "8443:8443"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      NIFI_WEB_HTTPS_PORT: 8443
+      SINGLE_USER_CREDENTIALS_USERNAME: admin
+      SINGLE_USER_CREDENTIALS_PASSWORD: cdm_nifi_2026!
+      NIFI_SENSITIVE_PROPS_KEY: cdm_sensitive_key_2026
+    volumes:
+      - nifi-data:/opt/nifi/nifi-current/data
+      - nifi-logs:/opt/nifi/nifi-current/logs
+      - ./docker/nifi/templates:/opt/nifi/nifi-current/conf/templates
+    healthcheck:
+      test: ["CMD", "curl", "-kf",
+             "https://localhost:8443/nifi-api/system-diagnostics"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+
+  # ============================================================
+  # 8. APACHE ATLAS — Data Lineage et catalogue
+  #    Interface : http://localhost:21000
+  #    Login : admin / admin
+  # ============================================================
+  atlas:
+    image: sburn/apache-atlas:2.3.0
+    container_name: cdm-atlas
+    networks:
+      - cdm-network
+    ports:
+      - "21000:21000"
+    environment:
+      ATLAS_ENABLE_TLS: "false"
+    volumes:
+      - atlas-data:/opt/apache-atlas/data
+    healthcheck:
+      test: ["CMD", "curl", "-f",
+             "http://localhost:21000/api/atlas/admin/version"]
+      interval: 30s
+      timeout: 15s
+      retries: 15
+
+  # ============================================================
+  # 9. OLLAMA — Serveur LLM local pour Mistral
+  #    API : http://localhost:11434
+  # ============================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cdm-ollama
+    networks:
+      - cdm-network
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    # Pour GPU NVIDIA — décommente si disponible :
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ============================================================
+  # 10. SYNTHETIC DATA GENERATOR — Simule KONDOR+ deals
+  #     Publie dans Kafka comme Debezium le ferait
+  #     Remplacé par Debezium en production CDM
+  # ============================================================
+  synthetic-generator:
+    build:
+      context: .
+      dockerfile: docker/generator/Dockerfile
+    container_name: cdm-synthetic-generator
+    networks:
+      - cdm-network
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      TOPIC_DEALS: cdm.sisdm.kondor.dbo.deals
+      TOPIC_POSITIONS: cdm.sisdm.kondor.dbo.positions
+      TOPIC_MTM: cdm.sisdm.kondor.dbo.mtm
+      DEALS_PER_MINUTE: 10
+      ANOMALY_RATE: 0.05
+    volumes:
+      - ./synthetic_data:/app
+    restart: unless-stopped
+
+  # ============================================================
+  # 11. PRIVACY GATEWAY — ØllamØnym CDM
+  #     Pseudonymisation avant traitement LLM
+  #     API : http://localhost:5000
+  # ============================================================
+  privacy-gateway:
+    build:
+      context: .
+      dockerfile: docker/gateway/Dockerfile
+    container_name: cdm-privacy-gateway
+    networks:
+      - cdm-network
+    ports:
+      - "5000:5000"
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      CDM_PSEUDONYM_SECRET: cdm_secret_key_change_in_prod
+      DREMIO_HOST: dremio
+      DREMIO_PORT: 9047
+    volumes:
+      - ./gateway:/app
+      - ./templates:/app/templates
+      - ./cdm_extensions:/app/cdm_extensions
+    restart: unless-stopped

@@ -1,0 +1,199 @@
+{
+  "template_id": "cdm-capital-markets-v1",
+  "version": 1,
+  "description": "Template de pseudonymisation spécifique aux données de la Salle des Marchés — Crédit du Maroc DSIG. Couvre les entités financières sensibles : identifiants de deals, traders, contreparties, montants, paires de devises, comptes bancaires. Conforme BAM N°5/G/2022 et Bâle III.",
+
+  "entities": [
+
+    {
+      "id": "DEAL_ID",
+      "enabled": true,
+      "instructions": "Detect trade or deal identifiers used in capital markets systems like KONDOR+ or ARPSON. These follow patterns like CDM-XXXXX, TRD-XXXXX, or any alphanumeric code referencing a specific financial transaction.",
+      "examples": {
+        "positive": ["CDM-08547", "CDM-00123", "TRD-20260415-001", "DEAL-EUR-2026-0042"],
+        "negative": ["the deal", "transaction", "opération", "ordre"]
+      },
+      "fake_provider": "deterministic"
+    },
+
+    {
+      "id": "TRADER",
+      "enabled": true,
+      "instructions": "Detect trader identifiers, trader codes, or trader names operating in the capital markets room (Salle des Marchés). Includes system codes like TRADER_01, TRAD_XX, or real names of traders.",
+      "examples": {
+        "positive": ["TRADER_01", "TRADER_07", "TRAD_03", "Mohamed Benchekroun", "Youssef El Alami"],
+        "negative": ["the trader", "le trader", "opérateur", "utilisateur"]
+      },
+      "fake_provider": "name"
+    },
+
+    {
+      "id": "COUNTERPARTY",
+      "enabled": true,
+      "instructions": "Detect counterparty names in financial transactions: banks, financial institutions, investment funds, brokerage firms, or corporate entities on the other side of a trade. These are organizations that CDM trades with.",
+      "examples": {
+        "positive": ["Attijariwafa Bank", "BNP Paribas", "Société Générale Maroc", "CIH Bank", "BMCE Bank", "Goldman Sachs", "Fonds de pension OCP"],
+        "negative": ["la contrepartie", "banque", "institution", "partenaire"]
+      },
+      "fake_provider": "company"
+    },
+
+    {
+      "id": "CURRENCY_PAIR",
+      "enabled": true,
+      "instructions": "Detect currency pairs used in FX (foreign exchange) transactions in the format XXX/YYY where XXX and YYY are ISO 4217 currency codes. Common pairs at CDM include EUR/MAD, USD/MAD, GBP/MAD.",
+      "examples": {
+        "positive": ["EUR/MAD", "USD/MAD", "GBP/MAD", "CHF/MAD", "JPY/MAD", "EUR/USD"],
+        "negative": ["euro", "dollar", "dirham", "devise", "monnaie"]
+      },
+      "fake_provider": "deterministic"
+    },
+
+    {
+      "id": "TRADE_AMOUNT",
+      "enabled": true,
+      "instructions": "Detect monetary amounts associated with financial trades or positions. These are large numerical values (typically millions) with or without currency symbols, representing notional amounts, P&L figures, or MTM values.",
+      "examples": {
+        "positive": ["10 000 000 MAD", "10,000,000 EUR", "490 350 000", "85M MAD", "12.5 millions de dirhams", "490,350,000.00"],
+        "negative": ["le montant", "valeur", "prix", "coût"]
+      },
+      "fake_provider": "deterministic"
+    },
+
+    {
+      "id": "TRADE_RATE",
+      "enabled": true,
+      "instructions": "Detect exchange rates or pricing rates for financial instruments. These are decimal numbers typically between 1 and 20 for MAD pairs, representing the rate at which a trade was executed.",
+      "examples": {
+        "positive": ["10.91", "10.85", "10.9312", "taux de 10.93", "au cours de 10.8750"],
+        "negative": ["taux d'intérêt général", "pourcentage", "le taux"]
+      },
+      "fake_provider": "deterministic"
+    },
+
+    {
+      "id": "BANK_ACCOUNT",
+      "enabled": true,
+      "instructions": "Detect bank account numbers, IBAN codes, RIB codes, or any financial account identifiers. Moroccan RIB format: 24 digits. IBAN format: MAxx followed by digits.",
+      "examples": {
+        "positive": ["MA64011519000001234567890", "MA76 0115 1900 0001 2345 6789 0", "007780000012345678901234", "IBAN MA76 0115"],
+        "negative": ["numéro de compte", "compte bancaire", "RIB"]
+      },
+      "fake_provider": "deterministic"
+    },
+
+    {
+      "id": "SWIFT_BIC",
+      "enabled": true,
+      "instructions": "Detect SWIFT codes or BIC (Bank Identifier Code) used in interbank communications and trade settlements. Format: 8 or 11 alphanumeric characters.",
+      "examples": {
+        "positive": ["BCDMMAMC", "SGMBMAMC", "BCDMMAMC001", "ATTMMAMC", "BNPAFRPP"],
+        "negative": ["code banque", "identifiant", "référence"]
+      },
+      "fake_provider": "deterministic"
+    },
+
+    {
+      "id": "POSITION_ID",
+      "enabled": true,
+      "instructions": "Detect position identifiers that reference aggregated trading positions. These typically follow formats like POS-XXXXX or POSITION-XXX.",
+      "examples": {
+        "positive": ["POS-EUR-001", "POSITION-2026-042", "POS-00789", "NET-EUR/MAD-20260415"],
+        "negative": ["la position", "position nette", "exposition"]
+      },
+      "fake_provider": "deterministic"
+    },
+
+    {
+      "id": "DESK",
+      "enabled": true,
+      "instructions": "Detect trading desk names or identifiers within the Salle des Marchés. These identify specific teams or units within the capital markets division.",
+      "examples": {
+        "positive": ["SDM_CASA", "Desk FX", "Desk Taux", "Mesa de cambios", "Fixed Income Desk", "Desk Monétaire"],
+        "negative": ["le desk", "l'équipe", "le département"]
+      },
+      "fake_provider": "deterministic"
+    },
+
+    {
+      "id": "PERSON",
+      "enabled": true,
+      "instructions": "Detect full names of real people including traders, managers, analysts, compliance officers, or any named individual referenced in the document.",
+      "examples": {
+        "positive": ["Mehdi Seghrouchni", "Anas Roui", "Fatima Zahra El Idrissi", "Mohammed Benali"],
+        "negative": ["le manager", "l'encadrant", "le directeur", "la personne"]
+      },
+      "fake_provider": "name"
+    },
+
+    {
+      "id": "EMAIL",
+      "enabled": true,
+      "instructions": "Detect email addresses of CDM employees, counterparties, or any professional email found in the text.",
+      "examples": {
+        "positive": ["m.seghrouchni@creditdumaroc.ma", "trader01@cdm.ma", "compliance@creditdumaroc.ma"],
+        "negative": ["envoyer un mail", "par email", "contact"]
+      },
+      "fake_provider": "email"
+    },
+
+    {
+      "id": "PHONE",
+      "enabled": true,
+      "instructions": "Detect phone numbers including Moroccan format (+212) and international formats.",
+      "examples": {
+        "positive": ["+212 641 408 560", "0641408560", "+33 1 23 45 67 89"],
+        "negative": ["numéro", "téléphone", "appeler"]
+      },
+      "fake_provider": "phone_number"
+    }
+
+  ],
+
+  "llm": {
+    "model": "mistral",
+    "system": "You are a financial data privacy expert specialized in Moroccan capital markets. Your task is to extract sensitive financial entities from text. Return ONLY valid JSON matching the specified schema. Do not include any explanations or extra text. Be precise: only flag actual entity values, not generic financial terms.",
+    "max_entities": 300
+  },
+
+  "canon": {
+    "unicode_normalize": "NFKC",
+    "collapse_whitespace": true,
+    "casefold": false,
+    "strip_outer_punct": true
+  },
+
+  "replacement": {
+    "placeholder_format": "<<{ENTITY}:{ID}>>",
+    "pseudonym": {
+      "mode": "session_stable",
+      "id_len": 6,
+      "secret_env": "CDM_PSEUDONYM_SECRET",
+      "providers": {
+        "PERSON"       : "name",
+        "TRADER"       : "name",
+        "COUNTERPARTY" : "company",
+        "EMAIL"        : "email",
+        "PHONE"        : "phone_number",
+        "DEAL_ID"      : "bothify",
+        "POSITION_ID"  : "bothify",
+        "BANK_ACCOUNT" : "bothify",
+        "SWIFT_BIC"    : "bothify",
+        "CURRENCY_PAIR": "bothify",
+        "TRADE_AMOUNT" : "pyfloat",
+        "TRADE_RATE"   : "pyfloat",
+        "DESK"         : "bothify"
+      }
+    }
+  },
+
+  "postpass_alias": {
+    "enabled": true,
+    "entity_ids": ["PERSON", "TRADER", "COUNTERPARTY", "EMAIL", "DEAL_ID"],
+    "min_token_len": 2,
+    "window_size": 3,
+    "min_overlap_tokens": 2,
+    "session_ttl_seconds": 3600,
+    "max_aliases_per_entity": 100
+  }
+}

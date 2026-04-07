@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>StreamGuard — CDM Capital Markets Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg      : #f2f1ee;
+  --ink     : #0e0e0e;
+  --ink-soft: #4a4a4a;
+  --line    : #d4d2cc;
+  --card    : rgba(255,255,255,0.72);
+  --surface : rgba(255,255,255,0.44);
+  --red     : #c8000f;
+  --red-soft: rgba(200,0,15,0.12);
+  --red-halo: rgba(200,0,15,0.28);
+  --marine  : #0d2b55;
+  --marine-s: rgba(13,43,85,0.10);
+  --teal    : #007c87;
+  --teal-s  : rgba(0,124,135,0.12);
+  --gold    : #b07d00;
+  --ok      : #1a6b3c;
+  --ok-s    : rgba(26,107,60,0.12);
+  --warn    : #b05a00;
+  --warn-s  : rgba(176,90,0,0.12);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+body {
+  font-family:'Syne',sans-serif;
+  color:var(--ink);
+  background:
+    linear-gradient(rgba(242,241,238,0.6),rgba(242,241,238,0.6)),
+    repeating-linear-gradient(90deg,rgba(0,0,0,0.025) 0,rgba(0,0,0,0.025) 1px,transparent 1px,transparent 28px),
+    repeating-linear-gradient(0deg,rgba(0,0,0,0.015) 0,rgba(0,0,0,0.015) 1px,transparent 1px,transparent 28px),
+    radial-gradient(ellipse at 8% 0%,rgba(13,43,85,0.08),transparent 42%),
+    radial-gradient(ellipse at 92% 100%,rgba(200,0,15,0.06),transparent 40%),
+    var(--bg);
+  min-height:100vh;
+}
+
+/* ORB BACKGROUNDS */
+.orb{position:fixed;z-index:-1;border-radius:50%;filter:blur(70px);opacity:0.18;pointer-events:none}
+.orb-a{width:320px;height:320px;background:var(--marine);top:-60px;left:-100px}
+.orb-b{width:280px;height:280px;background:var(--red);bottom:-60px;right:-80px}
+.orb-c{width:200px;height:200px;background:var(--teal);top:40%;left:50%;transform:translateX(-50%)}
+
+/* TOPBAR */
+.topbar{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:14px 24px;
+  background:rgba(255,255,255,0.7);
+  border-bottom:1px solid var(--line);
+  backdrop-filter:blur(16px);
+  position:sticky;top:0;z-index:100;
+}
+.topbar-brand{display:flex;align-items:center;gap:10px}
+.brand-badge{
+  background:var(--marine);color:#fff;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;font-weight:600;
+  padding:4px 10px;border-radius:4px;
+  letter-spacing:1px;
+}
+.brand-name{
+  font-size:17px;font-weight:800;
+  color:var(--marine);letter-spacing:-0.3px;
+}
+.brand-name span{color:var(--red)}
+.topbar-right{display:flex;gap:8px;align-items:center}
+
+.status-pill{
+  display:flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:999px;
+  border:1px solid var(--line);
+  background:var(--surface);
+  font-size:11px;font-weight:600;
+  backdrop-filter:blur(8px);
+  font-family:'IBM Plex Mono',monospace;
+}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dot-ok{background:var(--ok);box-shadow:0 0 8px rgba(26,107,60,0.6)}
+.dot-warn{background:var(--warn);box-shadow:0 0 8px rgba(176,90,0,0.5)}
+.dot-off{background:#999}
+.dot-pulse{animation:dotpulse 1.4s infinite ease-in-out}
+@keyframes dotpulse{0%,100%{opacity:0.4;transform:scale(0.8)}50%{opacity:1;transform:scale(1)}}
+
+/* TABS */
+.tabs-wrap{padding:16px 24px 0;display:flex;gap:6px;overflow-x:auto}
+.tab{
+  border:1px solid var(--line);
+  background:var(--surface);
+  border-radius:999px;
+  padding:7px 16px;
+  cursor:pointer;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;font-weight:600;
+  letter-spacing:0.5px;
+  text-transform:uppercase;
+  color:var(--ink-soft);
+  backdrop-filter:blur(8px);
+  transition:all 0.2s;
+  white-space:nowrap;
+}
+.tab:hover{border-color:var(--marine);color:var(--marine)}
+.tab.active{
+  background:linear-gradient(135deg,var(--marine),#1a3d6e);
+  color:#fff;border-color:var(--marine);
+  box-shadow:0 6px 18px var(--marine-s);
+}
+.tab.active.red{
+  background:linear-gradient(135deg,var(--red),#a30010);
+  border-color:var(--red);
+  box-shadow:0 6px 18px var(--red-halo);
+}
+
+/* MAIN */
+main{padding:20px 24px 32px}
+.panel{display:none}
+.panel.active{display:block;animation:panelfade 0.28s ease}
+@keyframes panelfade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* CARDS */
+.card{
+  background:linear-gradient(145deg,var(--card),rgba(255,255,255,0.5));
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:18px;
+  backdrop-filter:blur(14px);
+  box-shadow:0 6px 24px rgba(0,0,0,0.07);
+  margin-bottom:16px;
+}
+.card-head{
+  display:flex;justify-content:space-between;
+  align-items:center;margin-bottom:14px;
+}
+.card-title{font-size:13px;font-weight:700;color:var(--marine);letter-spacing:0.3px}
+.eyebrow{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:9px;font-weight:600;
+  letter-spacing:2px;text-transform:uppercase;
+  color:var(--ink-soft);margin-bottom:4px;
+}
+
+/* GRID */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:900px){.g2,.g3,.g4{grid-template-columns:1fr}}
+
+/* KPI */
+.kpi-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.kpi{
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:10px;
+  text-align:center;
+  backdrop-filter:blur(8px);
+}
+.kpi-val{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:20px;font-weight:600;
+  color:var(--marine);display:block;
+}
+.kpi-val.red{color:var(--red)}
+.kpi-val.ok{color:var(--ok)}
+.kpi-lbl{font-size:10px;color:var(--ink-soft);margin-top:2px;display:block}
+
+/* STAT CARDS */
+.stat-card{
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:12px;
+  padding:14px 16px;
+  backdrop-filter:blur(8px);
+}
+.stat-card.marine{border-color:rgba(13,43,85,0.3);background:var(--marine-s)}
+.stat-card.red{border-color:rgba(200,0,15,0.3);background:var(--red-soft)}
+.stat-card.ok{border-color:rgba(26,107,60,0.3);background:var(--ok-s)}
+.stat-card.warn{border-color:rgba(176,90,0,0.3);background:var(--warn-s)}
+.stat-val{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:24px;font-weight:600;
+  color:var(--marine);
+}
+.stat-val.red{color:var(--red)}
+.stat-val.ok{color:var(--ok)}
+.stat-val.warn{color:var(--warn)}
+.stat-lbl{font-size:11px;color:var(--ink-soft);margin-top:4px}
+
+/* PIPELINE TIMELINE */
+.timeline{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  max-height:260px;
+  overflow-y:auto;
+}
+.tl-item{
+  display:flex;gap:10px;align-items:flex-start;
+  padding:6px 0;
+  border-bottom:1px dashed var(--line);
+  animation:tlslide 0.3s ease;
+}
+@keyframes tlslide{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+.tl-time{color:var(--ink-soft);flex-shrink:0;min-width:60px}
+.tl-step{
+  padding:1px 8px;border-radius:4px;
+  font-size:10px;font-weight:600;
+  flex-shrink:0;
+}
+.tl-consumer{background:var(--marine-s);color:var(--marine)}
+.tl-pseudo{background:var(--red-soft);color:var(--red)}
+.tl-producer{background:var(--ok-s);color:var(--ok)}
+.tl-audit{background:var(--teal-s);color:var(--teal)}
+.tl-msg{color:var(--ink-soft);font-size:10px}
+
+/* MAPPING TABLE */
+.map-table{width:100%;border-collapse:collapse;font-size:12px}
+.map-table th{
+  background:var(--marine);color:rgba(255,255,255,0.7);
+  font-family:'IBM Plex Mono',monospace;
+  font-size:9px;font-weight:600;
+  letter-spacing:1.5px;text-transform:uppercase;
+  padding:8px 12px;text-align:left;
+}
+.map-table td{
+  padding:7px 12px;
+  border-bottom:1px solid var(--line);
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+}
+.map-table tr:hover td{background:var(--surface)}
+.token-badge{
+  display:inline-block;
+  background:var(--red-soft);
+  color:var(--red);
+  border:1px solid rgba(200,0,15,0.2);
+  border-radius:4px;
+  padding:1px 6px;
+  font-size:10px;
+}
+.orig-val{color:var(--ink-soft)}
+.method-badge{
+  display:inline-block;
+  padding:1px 6px;border-radius:4px;
+  font-size:9px;font-weight:600;
+}
+.m-regex{background:var(--marine-s);color:var(--marine)}
+.m-llm{background:var(--teal-s);color:var(--teal)}
+
+/* DEAL BEFORE/AFTER */
+.deal-split{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:start}
+.deal-panel{
+  background:rgba(10,10,10,0.94);
+  color:#e8e8e8;
+  border-radius:10px;
+  padding:14px;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  line-height:1.8;
+  border:1px solid #2a2a2a;
+  min-height:160px;
+}
+.deal-arrow{
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;color:var(--red);
+  padding-top:60px;
+}
+.field-key{color:#7aa3c8}
+.field-val{color:#e8e8e8}
+.field-val.masked{color:#e1061b;font-weight:600}
+.field-val.anomaly{color:#f59e0b;font-weight:600}
+
+/* BARS */
+.bar-wrap{margin:8px 0}
+.bar-label{display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px}
+.bar-track{height:6px;background:var(--line);border-radius:999px;overflow:hidden}
+.bar-fill{height:100%;border-radius:999px;transition:width 0.8s ease}
+.bar-marine{background:linear-gradient(90deg,var(--marine),var(--teal))}
+.bar-red{background:linear-gradient(90deg,var(--red),#ff4d5e)}
+.bar-ok{background:linear-gradient(90deg,var(--ok),#2da866)}
+
+/* POSITION TABLE */
+.pos-table{width:100%;border-collapse:collapse;font-size:12px}
+.pos-table th{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:9px;font-weight:600;
+  letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--ink-soft);
+  padding:6px 10px;text-align:left;
+  border-bottom:2px solid var(--line);
+}
+.pos-table td{
+  padding:8px 10px;
+  border-bottom:1px solid var(--line);
+}
+.pos-table tr:hover td{background:var(--surface)}
+.ccy{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--marine)}
+.amt{font-family:'IBM Plex Mono',monospace;font-size:12px}
+.pnl-pos{color:var(--ok);font-weight:600;font-family:'IBM Plex Mono',monospace}
+.pnl-neg{color:var(--red);font-weight:600;font-family:'IBM Plex Mono',monospace}
+
+/* ANOMALY */
+.anomaly-row{
+  display:flex;gap:10px;align-items:center;
+  padding:10px 12px;
+  border-radius:10px;
+  margin-bottom:8px;
+  border:1px solid transparent;
+  transition:all 0.2s;
+}
+.anomaly-row.critical{background:var(--red-soft);border-color:rgba(200,0,15,0.2)}
+.anomaly-row.warning{background:var(--warn-s);border-color:rgba(176,90,0,0.2)}
+.anomaly-icon{font-size:18px;flex-shrink:0}
+.anomaly-info{flex:1}
+.anomaly-deal{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600}
+.anomaly-type{
+  display:inline-block;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:9px;font-weight:600;
+  padding:1px 7px;border-radius:3px;
+  margin-left:6px;
+  background:var(--red-soft);color:var(--red);
+}
+.anomaly-type.warn{background:var(--warn-s);color:var(--warn)}
+.anomaly-desc{font-size:11px;color:var(--ink-soft);margin-top:2px}
+.anomaly-score{
+  font-family:'IBM Plex Mono',monospace;
+  font-size:13px;font-weight:600;
+  color:var(--red);text-align:right;
+}
+.anomaly-time{font-size:10px;color:var(--ink-soft)}
+
+/* CHAT */
+.chat-box{
+  height:320px;overflow-y:auto;
+  padding:12px;
+  background:rgba(10,10,10,0.04);
+  border:1px solid var(--line);
+  border-radius:10px;
+  margin-bottom:12px;
+  display:flex;flex-direction:column;gap:10px;
+}
+.msg{
+  max-width:82%;
+  padding:10px 14px;
+  border-radius:12px;
+  font-size:13px;
+  line-height:1.5;
+}
+.msg-user{
+  align-self:flex-end;
+  background:linear-gradient(135deg,var(--marine),#1a3d6e);
+  color:#fff;
+  border-radius:12px 12px 4px 12px;
+}
+.msg-ai{
+  align-self:flex-start;
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:12px 12px 12px 4px;
+}
+.msg-sql{
+  background:rgba(10,10,10,0.94);
+  color:#7aa3c8;
+  font-family:'IBM Plex Mono',monospace;
+  font-size:11px;
+  border-radius:8px;
+  padding:8px 12px;
+  margin-top:6px;
+  display:block;
+}
+.chat-input-wrap{display:flex;gap:8px}
+.chat-input{
+  flex:1;
+  padding:10px 14px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  font-family:'Syne',sans-serif;
+  font-size:13px;
+  background:var(--card);
+  backdrop-filter:blur(8px);
+  color:var(--ink);
+  outline:none;
+}
+.chat-input:focus{border-color:var(--marine)}
+
+/* BENCHMARK TABLE */
+.bench-table{width:100%;border-collapse:collapse;font-size:12px}
+.bench-table th{
+  background:var(--marine);color:rgba(255,255,255,0.7);
+  font-family:'IBM Plex Mono',monospace;
+  font-size:9px;font-weight:600;
+  letter-spacing:1.5px;text-transform:uppercase;
+  padding:9px 12px;text-align:left;
+}
+.bench-table td{
+  padding:9px 12px;
+  border-bottom:1px solid var(--line);
+}
+.bench-table tr:hover td{background:var(--surface)}
+.bench-table td:first-child{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--marine)}
+.score-bar{
+  display:flex;align-items:center;gap:8px;
+}
+.score-fill{
+  height:4px;border-radius:999px;
+  background:linear-gradient(90deg,var(--marine),var(--teal));
+}
+.score-num{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600}
+.privacy-ok{color:var(--ok);font-size:14px}
+.privacy-warn{color:var(--red);font-size:14px}
+
+/* LINEAGE */
+.lineage-flow{
+  display:flex;
+  align-items:center;
+  gap:0;
+  overflow-x:auto;
+  padding:16px 0;
+  flex-wrap:nowrap;
+}
+.lineage-node{
+  flex-shrink:0;
+  text-align:center;
+  padding:10px 14px;
+  background:var(--surface);
+  border:1px solid var(--line);
+  border-radius:10px;
+  min-width:90px;
+  transition:all 0.2s;
+  cursor:default;
+}
+.lineage-node:hover{
+  background:var(--marine-s);
+  border-color:rgba(13,43,85,0.3);
+  transform:translateY(-2px);
+}
+.lineage-node.active{
+  background:var(--marine);
+  border-color:var(--marine);
+}
+.lineage-node.active .ln-name{color:#fff}
+.lineage-node.active .ln-tech{color:rgba(255,255,255,0.6)}
+.ln-icon{font-size:20px;margin-bottom:4px}
+.ln-name{font-size:11px;font-weight:700;color:var(--marine)}
+.ln-tech{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--ink-soft);margin-top:2px}
+.lineage-arrow{
+  font-size:16px;color:var(--teal);
+  flex-shrink:0;padding:0 6px;
+  font-family:'IBM Plex Mono',monospace;
+}
+
+/* BTNS */
+.btn{
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:var(--surface);
+  padding:8px 14px;
+  cursor:pointer;
+  font-family:'Syne',sans-serif;
+  font-size:12px;font-weight:600;
+  color:var(--ink);
+  backdrop-filter:blur(8px);
+  transition:all 0.18s;
+}
+.btn:hover{border-color:var(--marine);color:var(--marine);transform:translateY(-1px)}
+.btn-primary{
+  background:linear-gradient(135deg,var(--marine),#1a3d6e);
+  color:#fff;border-color:var(--marine);
+}
+.btn-primary:hover{
+  box-shadow:0 8px 20px var(--marine-s);
+  color:#fff;
+}
+.btn-red{
+  background:linear-gradient(135deg,var(--red),#a30010);
+  color:#fff;border-color:var(--red);
+}
+.btn-red:hover{box-shadow:0 8px 20px var(--red-halo);color:#fff}
+
+/* SIGNAL LINE */
+.signal{
+  display:grid;grid-template-columns:repeat(6,1fr);
+  gap:6px;margin:14px 0 0;
+}
+.signal span{
+  height:4px;border-radius:999px;
+  background:var(--line);
+  animation:sig 2s infinite ease-in-out;
+}
+.signal span:nth-child(2n){
+  background:linear-gradient(90deg,var(--marine),var(--teal));
+  box-shadow:0 0 8px var(--marine-s);
+}
+.signal span:nth-child(3n){
+  background:linear-gradient(90deg,var(--red),#ff4d5e);
+  box-shadow:0 0 8px var(--red-halo);
+}
+.signal span:nth-child(1){animation-delay:0s}
+.signal span:nth-child(2){animation-delay:0.2s}
+.signal span:nth-child(3){animation-delay:0.4s}
+.signal span:nth-child(4){animation-delay:0.6s}
+.signal span:nth-child(5){animation-delay:0.8s}
+.signal span:nth-child(6){animation-delay:1s}
+@keyframes sig{0%,100%{opacity:0.25;transform:scaleY(0.6)}50%{opacity:1;transform:scaleY(1)}}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:999px}
+</style>
+</head>
+<body>
+
+<div class="orb orb-a"></div>
+<div class="orb orb-b"></div>
+<div class="orb orb-c"></div>
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <div class="brand-badge">CDM · DSIG</div>
+    <div class="brand-name">Stream<span>Guard</span></div>
+    <div class="eyebrow" style="margin:0 0 0 8px">Capital Markets Intelligence</div>
+  </div>
+  <div class="topbar-right">
+    <div class="status-pill">
+      <span class="dot dot-ok dot-pulse"></span>
+      <span>Kafka LIVE</span>
+    </div>
+    <div class="status-pill">
+      <span class="dot dot-ok dot-pulse"></span>
+      <span>StreamGuard ON</span>
+    </div>
+    <div class="status-pill" id="pill-mistral">
+      <span class="dot dot-warn"></span>
+      <span>Mistral LOCAL</span>
+    </div>
+    <div class="status-pill" style="font-family:'IBM Plex Mono',monospace;font-size:10px" id="pill-time">
+      --:--:--
+    </div>
+  </div>
+</header>
+
+<!-- TABS -->
+<nav class="tabs-wrap">
+  <button class="tab active" onclick="showTab('stream',this)">① Live Stream</button>
+  <button class="tab" onclick="showTab('markets',this)">② Capital Markets</button>
+  <button class="tab red" onclick="showTab('anomaly',this)">③ Anomaly Detection</button>
+  <button class="tab" onclick="showTab('ai',this)">④ AI Assistant</button>
+  <button class="tab" onclick="showTab('bench',this)">⑤ LLM Benchmark</button>
+  <button class="tab" onclick="showTab('lineage',this)">⑥ Data Lineage</button>
+</nav>
+
+<main>
+
+<!-- ①  LIVE STREAM -->
+<div class="panel active" id="panel-stream">
+
+  <!-- KPIs -->
+  <div class="g4" style="margin-bottom:16px">
+    <div class="stat-card marine">
+      <div class="eyebrow">Deals traités</div>
+      <div class="stat-val" id="kpi-total">0</div>
+      <div class="stat-lbl">depuis démarrage</div>
+    </div>
+    <div class="stat-card red">
+      <div class="eyebrow">Entités masquées</div>
+      <div class="stat-val red" id="kpi-entities">0</div>
+      <div class="stat-lbl">tokens pseudonymisés</div>
+    </div>
+    <div class="stat-card ok">
+      <div class="eyebrow">Latence moy.</div>
+      <div class="stat-val ok" id="kpi-latency">0ms</div>
+      <div class="stat-lbl">pseudonymisation</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="eyebrow">Anomalies</div>
+      <div class="stat-val warn" id="kpi-anomalies">0</div>
+      <div class="stat-lbl">détectées aujourd'hui</div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <!-- Deal avant/après -->
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="eyebrow">StreamGuard — Pseudonymisation en vol</div>
+          <div class="card-title">Deal KONDOR+ → Topic Sécurisé</div>
+        </div>
+        <button class="btn btn-red" onclick="generateDeal()">▶ Nouveau Deal</button>
+      </div>
+
+      <div class="deal-split">
+        <div>
+          <div class="eyebrow" style="margin-bottom:6px;color:var(--red)">⬤ Topic Brut</div>
+          <div class="deal-panel" id="deal-before">
+            <span style="color:#555">En attente...</span>
+          </div>
+        </div>
+        <div class="deal-arrow">→</div>
+        <div>
+          <div class="eyebrow" style="margin-bottom:6px;color:var(--ok)">⬤ Topic Sécurisé</div>
+          <div class="deal-panel" id="deal-after">
+            <span style="color:#555">En attente...</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi"><span class="kpi-val" id="deal-entities">0</span><span class="kpi-lbl">Entités détectées</span></div>
+        <div class="kpi"><span class="kpi-val" id="deal-latency">0ms</span><span class="kpi-lbl">Latence</span></div>
+        <div class="kpi"><span class="kpi-val" id="deal-method">—</span><span class="kpi-lbl">Méthode</span></div>
+      </div>
+      <div class="signal"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    </div>
+
+    <!-- Pipeline Timeline + Mapping -->
+    <div>
+      <div class="card">
+        <div class="eyebrow">Pipeline Timeline</div>
+        <div class="card-title" style="margin-bottom:10px">Flux Kafka temps réel</div>
+        <div class="timeline" id="timeline">
+          <div class="tl-item">
+            <span class="tl-time">--:--:--</span>
+            <span class="tl-step tl-consumer">CONSUMER</span>
+            <span class="tl-msg">En attente de messages Kafka...</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow">Mapping Inspector</div>
+        <div class="card-title" style="margin-bottom:10px">Tokens CDM — Session courante</div>
+        <table class="map-table">
+          <thead>
+            <tr>
+              <th>Champ</th>
+              <th>Valeur originale</th>
+              <th>Token</th>
+              <th>Méthode</th>
+              <th>Conf.</th>
+            </tr>
+          </thead>
+          <tbody id="mapping-tbody">
+            <tr><td colspan="5" style="color:var(--ink-soft);text-align:center;padding:16px;font-family:'IBM Plex Mono',monospace;font-size:11px">Aucun deal traité</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ② CAPITAL MARKETS -->
+<div class="panel" id="panel-markets">
+
+  <div class="g4" style="margin-bottom:16px">
+    <div class="stat-card marine">
+      <div class="eyebrow">Position EUR/MAD</div>
+      <div class="stat-val" id="pos-eur">490,350,000</div>
+      <div class="stat-lbl">MAD · 12 deals</div>
+    </div>
+    <div class="stat-card">
+      <div class="eyebrow">Position USD/MAD</div>
+      <div class="stat-val">120,240,000</div>
+      <div class="stat-lbl">MAD · 4 deals</div>
+    </div>
+    <div class="stat-card ok">
+      <div class="eyebrow">P&L Net Journalier</div>
+      <div class="stat-val ok">+920,000</div>
+      <div class="stat-lbl">MAD · aujourd'hui</div>
+    </div>
+    <div class="stat-card">
+      <div class="eyebrow">MTM Intraday</div>
+      <div class="stat-val">245,000</div>
+      <div class="stat-lbl">MAD · mark-to-market</div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="eyebrow">Positions Nettes par Devise</div>
+      <div class="card-title" style="margin-bottom:14px">Gold Layer — Dremio DirectQuery</div>
+      <div id="positions-bars">
+        <div class="bar-wrap">
+          <div class="bar-label"><span class="ccy">EUR/MAD</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">490,350,000 MAD</span></div>
+          <div class="bar-track"><div class="bar-fill bar-marine" style="width:100%"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span class="ccy">USD/MAD</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">120,240,000 MAD</span></div>
+          <div class="bar-track"><div class="bar-fill bar-marine" style="width:24%"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span class="ccy">GBP/MAD</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">91,200,000 MAD</span></div>
+          <div class="bar-track"><div class="bar-fill bar-marine" style="width:18%"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span class="ccy">CHF/MAD</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px">45,600,000 MAD</span></div>
+          <div class="bar-track"><div class="bar-fill bar-marine" style="width:9%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="eyebrow">P&L Journalier par Devise</div>
+      <div class="card-title" style="margin-bottom:14px">Back Office — Calcul PNL quotidien</div>
+      <table class="pos-table">
+        <thead>
+          <tr><th>Devise</th><th>P&L</th><th>Nb Deals</th><th>Statut</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="ccy">EUR/MAD</td>
+            <td class="pnl-pos">+1,240,000</td>
+            <td style="font-family:'IBM Plex Mono',monospace">12</td>
+            <td><span class="method-badge m-regex">CONFORME</span></td>
+          </tr>
+          <tr>
+            <td class="ccy">USD/MAD</td>
+            <td class="pnl-neg">-320,000</td>
+            <td style="font-family:'IBM Plex Mono',monospace">4</td>
+            <td><span class="method-badge m-regex">CONFORME</span></td>
+          </tr>
+          <tr>
+            <td class="ccy">GBP/MAD</td>
+            <td class="pnl-pos">+180,000</td>
+            <td style="font-family:'IBM Plex Mono',monospace">3</td>
+            <td><span class="method-badge m-regex">CONFORME</span></td>
+          </tr>
+          <tr>
+            <td class="ccy">CHF/MAD</td>
+            <td class="pnl-neg">-180,000</td>
+            <td style="font-family:'IBM Plex Mono',monospace">2</td>
+            <td><span style="color:var(--warn);font-size:11px;font-weight:600">⚠ VÉRIFIER</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:11px;color:var(--ink-soft)">P&L Net Total</span>
+        <span class="pnl-pos" style="font-size:16px">+920,000 MAD</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">MTM Intraday — Mark-to-Market</div>
+    <div class="card-title" style="margin-bottom:14px">Valeur de marché temps réel</div>
+    <table class="pos-table">
+      <thead>
+        <tr><th>Deal Token</th><th>Devise</th><th>Taux Deal</th><th>Taux Marché</th><th>MTM Value</th><th>Écart</th></tr>
+      </thead>
+      <tbody id="mtm-tbody">
+        <tr>
+          <td class="ccy">DEAL_a3f9</td><td>EUR/MAD</td>
+          <td style="font-family:'IBM Plex Mono',monospace">10.91</td>
+          <td style="font-family:'IBM Plex Mono',monospace">10.93</td>
+          <td class="pnl-pos">+20,000</td>
+          <td><span class="method-badge m-regex">NORMAL</span></td>
+        </tr>
+        <tr>
+          <td class="ccy">DEAL_b2e1</td><td>USD/MAD</td>
+          <td style="font-family:'IBM Plex Mono',monospace">9.85</td>
+          <td style="font-family:'IBM Plex Mono',monospace">9.81</td>
+          <td class="pnl-neg">-20,000</td>
+          <td><span class="method-badge m-regex">NORMAL</span></td>
+        </tr>
+        <tr>
+          <td class="ccy">DEAL_c4d7</td><td>EUR/MAD</td>
+          <td style="font-family:'IBM Plex Mono',monospace">10.91</td>
+          <td style="font-family:'IBM Plex Mono',monospace">12.45</td>
+          <td class="pnl-neg">-154,000</td>
+          <td><span style="color:var(--red);font-size:11px;font-weight:600;font-family:'IBM Plex Mono',monospace">⚠ ÉCART</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ③ ANOMALY DETECTION -->
+<div class="panel" id="panel-anomaly">
+
+  <div class="g3" style="margin-bottom:16px">
+    <div class="stat-card red">
+      <div class="eyebrow">Anomalies critiques</div>
+      <div class="stat-val red">2</div>
+      <div class="stat-lbl">deals suspects aujourd'hui</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="eyebrow">Alertes warnings</div>
+      <div class="stat-val warn">1</div>
+      <div class="stat-lbl">à vérifier</div>
+    </div>
+    <div class="stat-card ok">
+      <div class="eyebrow">Deals normaux</div>
+      <div class="stat-val ok">242</div>
+      <div class="stat-lbl">traités sans anomalie</div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="card">
+      <div class="eyebrow">Anomalies détectées — Temps réel</div>
+      <div class="card-title" style="margin-bottom:14px">Isolation Forest · Seuil : -0.75</div>
+
+      <div class="anomaly-row critical">
+        <div class="anomaly-icon">🚨</div>
+        <div class="anomaly-info">
+          <div class="anomaly-deal">DEAL_a3f9 <span class="anomaly-type">RATE_OUTLIER</span></div>
+          <div class="anomaly-desc">Taux EUR/MAD 12.45 — fourchette normale 10.70-11.10 — écart +12%</div>
+        </div>
+        <div>
+          <div class="anomaly-score">-0.91</div>
+          <div class="anomaly-time">14h31</div>
+        </div>
+      </div>
+
+      <div class="anomaly-row critical">
+        <div class="anomaly-icon">🚨</div>
+        <div class="anomaly-info">
+          <div class="anomaly-deal">DEAL_b2e1 <span class="anomaly-type">AMOUNT_OUTLIER</span></div>
+          <div class="anomaly-desc">Montant 285,000,000 MAD — moyenne normale 25M — 11x supérieur</div>
+        </div>
+        <div>
+          <div class="anomaly-score">-0.85</div>
+          <div class="anomaly-time">15h12</div>
+        </div>
+      </div>
+
+      <div class="anomaly-row warning">
+        <div class="anomaly-icon">⚠️</div>
+        <div class="anomaly-info">
+          <div class="anomaly-deal">DEAL_c4d7 <span class="anomaly-type warn">OFF_HOURS</span></div>
+          <div class="anomaly-desc">Deal saisi à 23h47 — hors heures de marché (8h-18h)</div>
+        </div>
+        <div>
+          <div class="anomaly-score" style="color:var(--warn)">-0.78</div>
+          <div class="anomaly-time">23h47</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="eyebrow">Benchmark ML — Isolation Forest vs Autoencoder</div>
+      <div class="card-title" style="margin-bottom:14px">Évaluation sur données KONDOR+ réelles</div>
+
+      <div style="margin-bottom:16px">
+        <div class="eyebrow" style="margin-bottom:8px">Isolation Forest (Scikit-learn)</div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>F1-Score</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600">0.89</span></div>
+          <div class="bar-track"><div class="bar-fill bar-marine" style="width:89%"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>Précision</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600">0.91</span></div>
+          <div class="bar-track"><div class="bar-fill bar-marine" style="width:91%"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>Rappel</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600">0.87</span></div>
+          <div class="bar-track"><div class="bar-fill bar-marine" style="width:87%"></div></div>
+        </div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-soft);margin-top:4px">Inférence : 2ms/deal</div>
+      </div>
+
+      <div>
+        <div class="eyebrow" style="margin-bottom:8px">Autoencoder (Keras/TensorFlow)</div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>F1-Score</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600">0.84</span></div>
+          <div class="bar-track"><div class="bar-fill bar-ok" style="width:84%"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>Précision</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600">0.86</span></div>
+          <div class="bar-track"><div class="bar-fill bar-ok" style="width:86%"></div></div>
+        </div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>Rappel</span><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600">0.82</span></div>
+          <div class="bar-track"><div class="bar-fill bar-ok" style="width:82%"></div></div>
+        </div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink-soft);margin-top:4px">Inférence : 18ms/deal</div>
+      </div>
+
+      <div style="margin-top:14px;padding:10px;background:var(--marine-s);border-radius:8px;border:1px solid rgba(13,43,85,0.2)">
+        <div style="font-size:11px;font-weight:700;color:var(--marine);margin-bottom:4px">✅ Modèle retenu : Isolation Forest</div>
+        <div style="font-size:11px;color:var(--ink-soft)">Meilleur F1-score (+5.9%) et 9x plus rapide en inférence</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ④ AI ASSISTANT -->
+<div class="panel" id="panel-ai">
+  <div class="g2">
+    <div class="card">
+      <div class="eyebrow">Assistant IA — Privacy-First</div>
+      <div class="card-title" style="margin-bottom:14px">Mistral 7B + StreamGuard + Dremio SQL</div>
+
+      <div class="chat-box" id="chat-box">
+        <div class="msg msg-ai">
+          Bonjour ! Je suis l'assistant IA de la Salle des Marchés CDM. Posez-moi une question sur vos positions, P&L ou anomalies. Vos données sont protégées par StreamGuard avant d'atteindre le modèle.
+        </div>
+      </div>
+
+      <div class="chat-input-wrap">
+        <input class="chat-input" id="chat-input"
+          placeholder="Ex: Quelle est notre position EUR/MAD ce matin ?"
+          onkeydown="if(event.key==='Enter')sendMessage()"/>
+        <button class="btn btn-primary" onclick="sendMessage()">Envoyer</button>
+      </div>
+
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn" style="font-size:10px" onclick="askQuestion('Quelle est notre position EUR/MAD ce matin ?')">Position EUR/MAD</button>
+        <button class="btn" style="font-size:10px" onclick="askQuestion('Y a-t-il des anomalies détectées aujourd\'hui ?')">Anomalies du jour</button>
+        <button class="btn" style="font-size:10px" onclick="askQuestion('Quel est le P&L net de la journée ?')">P&L journalier</button>
+        <button class="btn" style="font-size:10px" onclick="askQuestion('Combien de deals ont été traités ce matin ?')">Deals traités</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="eyebrow">StreamGuard — Flux de pseudonymisation</div>
+        <div class="card-title" style="margin-bottom:12px">Question → Anonymisée → SQL → Réponse</div>
+        <div id="pseudo-flow">
+          <div style="font-size:12px;color:var(--ink-soft);font-family:'IBM Plex Mono',monospace">En attente d'une question...</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="eyebrow">SQL généré par Mistral</div>
+        <div class="card-title" style="margin-bottom:10px">Requête anonymisée → Dremio</div>
+        <div class="deal-panel" style="min-height:100px" id="sql-panel">
+          <span style="color:#555">En attente...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ⑤ LLM BENCHMARK -->
+<div class="panel" id="panel-bench">
+  <div class="card">
+    <div class="eyebrow">Benchmark LLM — Text-to-SQL sur données CDM</div>
+    <div class="card-title" style="margin-bottom:6px">Comparaison modèles locaux vs API cloud via StreamGuard</div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:16px">
+      Tous les modèles cloud reçoivent des données pseudonymisées via StreamGuard — conformité BAM N°5/G/2022 garantie.
+    </div>
+
+    <table class="bench-table">
+      <thead>
+        <tr>
+          <th>Modèle</th>
+          <th>Type</th>
+          <th>SQL Accuracy</th>
+          <th>Latence</th>
+          <th>Coût/req</th>
+          <th>Qualité FR</th>
+          <th>Privacy</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Mistral 7B</td>
+          <td><span class="method-badge m-regex">LOCAL</span></td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill" style="width:87px"></div>
+              <span class="score-num">87%</span>
+            </div>
+          </td>
+          <td style="font-family:'IBM Plex Mono',monospace">2.3s</td>
+          <td style="font-family:'IBM Plex Mono',monospace;color:var(--ok)">0 MAD</td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill bar-marine" style="width:82px"></div>
+              <span class="score-num">82%</span>
+            </div>
+          </td>
+          <td><span class="privacy-ok">✅</span> Local</td>
+        </tr>
+        <tr>
+          <td>Llama 3.1 8B</td>
+          <td><span class="method-badge m-regex">LOCAL</span></td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill" style="width:82px"></div>
+              <span class="score-num">82%</span>
+            </div>
+          </td>
+          <td style="font-family:'IBM Plex Mono',monospace">3.1s</td>
+          <td style="font-family:'IBM Plex Mono',monospace;color:var(--ok)">0 MAD</td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill bar-marine" style="width:78px"></div>
+              <span class="score-num">78%</span>
+            </div>
+          </td>
+          <td><span class="privacy-ok">✅</span> Local</td>
+        </tr>
+        <tr style="background:var(--marine-s)">
+          <td style="font-weight:700">Claude 3.5 Sonnet</td>
+          <td><span class="method-badge m-llm">API</span></td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill bar-ok" style="width:96px"></div>
+              <span class="score-num" style="color:var(--ok);font-weight:700">96%</span>
+            </div>
+          </td>
+          <td style="font-family:'IBM Plex Mono',monospace">0.8s</td>
+          <td style="font-family:'IBM Plex Mono',monospace">0.12 MAD</td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill bar-ok" style="width:95px"></div>
+              <span class="score-num" style="color:var(--ok)">95%</span>
+            </div>
+          </td>
+          <td><span class="privacy-ok">✅</span> Gateway</td>
+        </tr>
+        <tr>
+          <td>GPT-4o</td>
+          <td><span class="method-badge m-llm">API</span></td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill bar-ok" style="width:94px"></div>
+              <span class="score-num">94%</span>
+            </div>
+          </td>
+          <td style="font-family:'IBM Plex Mono',monospace">1.1s</td>
+          <td style="font-family:'IBM Plex Mono',monospace">0.15 MAD</td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill bar-ok" style="width:92px"></div>
+              <span class="score-num">92%</span>
+            </div>
+          </td>
+          <td><span class="privacy-ok">✅</span> Gateway</td>
+        </tr>
+        <tr>
+          <td>Gemini 1.5 Pro</td>
+          <td><span class="method-badge m-llm">API</span></td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill bar-ok" style="width:91px"></div>
+              <span class="score-num">91%</span>
+            </div>
+          </td>
+          <td style="font-family:'IBM Plex Mono',monospace">0.9s</td>
+          <td style="font-family:'IBM Plex Mono',monospace">0.08 MAD</td>
+          <td>
+            <div class="score-bar">
+              <div class="score-fill bar-ok" style="width:88px"></div>
+              <span class="score-num">88%</span>
+            </div>
+          </td>
+          <td><span class="privacy-ok">✅</span> Gateway</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top:16px;padding:12px;background:var(--marine-s);border-radius:10px;border:1px solid rgba(13,43,85,0.2)">
+      <div style="font-size:12px;font-weight:700;color:var(--marine);margin-bottom:6px">
+        💡 Recommandation pour CDM Production
+      </div>
+      <div style="font-size:12px;color:var(--ink-soft);line-height:1.6">
+        <strong>Claude 3.5 Sonnet + StreamGuard</strong> = meilleure précision SQL (96%) avec latence optimale (0.8s).
+        Les données pseudonymisées par StreamGuard garantissent la conformité BAM.
+        Fallback local Mistral 7B si indisponibilité réseau.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ⑥ DATA LINEAGE -->
+<div class="panel" id="panel-lineage">
+  <div class="card">
+    <div class="eyebrow">Apache Atlas — Data Lineage</div>
+    <div class="card-title" style="margin-bottom:6px">Traçabilité complète — Source → Gold</div>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:20px">
+      Chaque deal est tracé de KONDOR+ jusqu'aux tables Gold. Conformité DCSI et BAM.
+    </div>
+
+    <div class="lineage-flow">
+      <div class="lineage-node active">
+        <div class="ln-icon">🗄️</div>
+        <div class="ln-name">KONDOR+</div>
+        <div class="ln-tech">MSSQL · CDC</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">🔌</div>
+        <div class="ln-name">Debezium</div>
+        <div class="ln-tech">CDC · LSN</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">📨</div>
+        <div class="ln-name">Kafka</div>
+        <div class="ln-tech">Topic brut</div>
+      </div>
+      <div class="lineage-arrow" style="color:var(--red)">→</div>
+      <div class="lineage-node" style="border-color:rgba(200,0,15,0.3);background:var(--red-soft)">
+        <div class="ln-icon">🔒</div>
+        <div class="ln-name" style="color:var(--red)">StreamGuard</div>
+        <div class="ln-tech">Pseudo · Audit</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">📨</div>
+        <div class="ln-name">Kafka</div>
+        <div class="ln-tech">Topic sécurisé</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">🔄</div>
+        <div class="ln-name">NiFi</div>
+        <div class="ln-tech">FlowFiles</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">🥉</div>
+        <div class="ln-name">Bronze</div>
+        <div class="ln-tech">Iceberg · Raw</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">⚡</div>
+        <div class="ln-name">PySpark</div>
+        <div class="ln-tech">Transform</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">🥈</div>
+        <div class="ln-name">Silver</div>
+        <div class="ln-tech">Cleaned · ML</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">🥇</div>
+        <div class="ln-name">Gold</div>
+        <div class="ln-tech">Positions · PNL</div>
+      </div>
+      <div class="lineage-arrow">→</div>
+      <div class="lineage-node">
+        <div class="ln-icon">⚡</div>
+        <div class="ln-name">Dremio</div>
+        <div class="ln-tech">SQL Engine</div>
+      </div>
+    </div>
+
+    <div class="g3" style="margin-top:16px">
+      <div class="stat-card marine">
+        <div class="eyebrow">Tables tracées</div>
+        <div class="stat-val">8</div>
+        <div class="stat-lbl">Bronze + Silver + Gold</div>
+      </div>
+      <div class="stat-card ok">
+        <div class="eyebrow">Couverture lineage</div>
+        <div class="stat-val ok">100%</div>
+        <div class="stat-lbl">chaque table tracée</div>
+      </div>
+      <div class="stat-card">
+        <div class="eyebrow">Conformité</div>
+        <div class="stat-val">BAM ✅</div>
+        <div class="stat-lbl">DCSI + Bâle III</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</main>
+
+<script>
+// ── TABS ─────────────────────────────────────────────────────
+function showTab(id, el) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  el.classList.add('active');
+}
+
+// ── CLOCK ─────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('pill-time').innerHTML =
+    `<span style="font-family:'IBM Plex Mono',monospace;font-size:10px">` +
+    now.toLocaleTimeString('fr-FR') + `</span>`;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── SYNTHETIC DATA ────────────────────────────────────────────
+const DEALS = ['CDM-08547','CDM-08548','CDM-08549','CDM-08550','CDM-08551'];
+const TRADERS = ['TRADER_01','TRADER_02','TRADER_03','TRADER_04'];
+const COUNTERPARTIES = ['Attijariwafa Bank','BNP Paribas Maroc','Société Générale','CIH Bank','BMCE Bank'];
+const DEVISES = ['EUR/MAD','USD/MAD','GBP/MAD','CHF/MAD'];
+const DESKS = ['SDM_CASA','Desk FX','Desk Taux'];
+
+let totalDeals = 0, totalEntities = 0, totalAnomalies = 0;
+const latencies = [];
+
+function rand(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function randFloat(min, max) { return (Math.random() * (max - min) + min).toFixed(4); }
+function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function hash(s) { let h = 0; for (let c of s) h = (h * 31 + c.charCodeAt(0)) & 0xffffff; return h.toString(16).padStart(6,'0').slice(0,4); }
+function token(type, val) { return `${type}_${hash(val + Date.now())}`; }
+function now() { return new Date().toLocaleTimeString('fr-FR'); }
+
+function generateDeal() {
+  const isAnomaly = Math.random() < 0.08;
+  const dealId    = rand(DEALS);
+  const trader    = rand(TRADERS);
+  const cpty      = rand(COUNTERPARTIES);
+  const devise    = rand(DEVISES);
+  const desk      = rand(DESKS);
+  const montant   = (randInt(1,50) * 1_000_000).toLocaleString('fr-FR');
+  const taux      = isAnomaly
+    ? (parseFloat(randFloat(12.5, 14.5))).toFixed(4)
+    : randFloat(10.70, 11.10);
+  const latency   = randInt(18, 85);
+
+  // Build tokens
+  const tDeal   = token('DEAL',   dealId);
+  const tTrader = token('TRADER', trader);
+  const tCpty   = token('ENTITY', cpty);
+  const tDevise = token('CCY',    devise);
+  const tAmt    = token('AMT',    montant);
+  const tRate   = token('RATE',   taux);
+
+  // BEFORE
+  document.getElementById('deal-before').innerHTML =
+    line('deal_id',     dealId,  false) +
+    line('trader',      trader,  false) +
+    line('contrepartie',cpty,    false) +
+    line('devise',      devise,  false) +
+    line('montant',     montant, false) +
+    line('taux',        taux,    false, isAnomaly);
+
+  // AFTER
+  document.getElementById('deal-after').innerHTML =
+    line('deal_id',     tDeal,   true) +
+    line('trader',      tTrader, true) +
+    line('contrepartie',tCpty,   true) +
+    line('devise',      tDevise, true) +
+    line('montant',     tAmt,    true) +
+    line('taux',        tRate,   true);
+
+  // Update KPIs
+  totalDeals++;
+  totalEntities += 6;
+  latencies.push(latency);
+  if (isAnomaly) totalAnomalies++;
+  const avgLat = Math.round(latencies.reduce((a,b)=>a+b,0)/latencies.length);
+
+  document.getElementById('kpi-total').textContent     = totalDeals;
+  document.getElementById('kpi-entities').textContent  = totalEntities;
+  document.getElementById('kpi-latency').textContent   = avgLat + 'ms';
+  document.getElementById('kpi-anomalies').textContent = totalAnomalies;
+  document.getElementById('deal-entities').textContent = '6';
+  document.getElementById('deal-latency').textContent  = latency + 'ms';
+  document.getElementById('deal-method').textContent   = 'regex+llm';
+
+  // Timeline
+  addTimelineEntry('CONSUMER', `Deal reçu — ${dealId}`, 'tl-consumer');
+  setTimeout(() => addTimelineEntry('PSEUDO', `6 entités pseudonymisées en ${latency}ms`, 'tl-pseudo'), 200);
+  setTimeout(() => addTimelineEntry('PRODUCER', `Publié → topic.secure`, 'tl-producer'), 400);
+  setTimeout(() => addTimelineEntry('AUDIT', `Log BAM enregistré`, 'tl-audit'), 600);
+
+  // Mapping table
+  const rows = [
+    [dealId,   tDeal,   'deal_id',      'regex', '1.00'],
+    [trader,   tTrader, 'trader',       'regex', '1.00'],
+    [cpty,     tCpty,   'contrepartie', 'llm',   '0.87'],
+    [devise,   tDevise, 'devise',       'regex', '1.00'],
+    [montant,  tAmt,    'montant',      'regex', '0.95'],
+    [taux,     tRate,   'taux',         'regex', '1.00'],
+  ];
+  document.getElementById('mapping-tbody').innerHTML = rows.map(([orig, tok, field, method, conf]) =>
+    `<tr>
+      <td style="color:var(--ink-soft);font-family:'IBM Plex Mono',monospace;font-size:10px">${field}</td>
+      <td class="orig-val">${orig}</td>
+      <td><span class="token-badge">${tok}</span></td>
+      <td><span class="method-badge ${method === 'regex' ? 'm-regex' : 'm-llm'}">${method}</span></td>
+      <td style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ok)">${conf}</td>
+    </tr>`
+  ).join('');
+}
+
+function line(key, val, masked, anomaly = false) {
+  const cls = anomaly ? 'field-val anomaly' : (masked ? 'field-val masked' : 'field-val');
+  return `<div><span class="field-key">${key}</span>: <span class="${cls}">${val}</span></div>`;
+}
+
+function addTimelineEntry(step, msg, cls) {
+  const tl = document.getElementById('timeline');
+  const item = document.createElement('div');
+  item.className = 'tl-item';
+  item.innerHTML = `<span class="tl-time">${now()}</span><span class="tl-step ${cls}">${step}</span><span class="tl-msg">${msg}</span>`;
+  tl.insertBefore(item, tl.firstChild);
+  if (tl.children.length > 20) tl.removeChild(tl.lastChild);
+}
+
+// Auto-generate deals
+setInterval(() => {
+  if (document.getElementById('panel-stream').classList.contains('active')) {
+    generateDeal();
+  }
+}, 4000);
+
+// ── AI ASSISTANT ──────────────────────────────────────────────
+const AI_RESPONSES = {
+  'position eur': {
+    reponse: "La position nette EUR/MAD ce matin est de <strong>490 350 000 MAD</strong>, basée sur 12 deals confirmés. Dernière mise à jour à 14h35.",
+    sql: "SELECT devise, position_mad, nb_deals\nFROM gold.positions_nettes\nWHERE devise = 'CCY_d1e2'\nAND DATE(derniere_maj) = CURRENT_DATE",
+    pseudo_q: "Quelle est notre position CCY_d1e2 ce matin ?"
+  },
+  'anomalie': {
+    reponse: "3 deals suspects détectés aujourd'hui :\n• <strong>DEAL_a3f9</strong> — taux hors fourchette (+12%) à 14h31 🚨\n• <strong>DEAL_b2e1</strong> — montant 11x supérieur à la normale à 15h12 🚨\n• <strong>DEAL_c4d7</strong> — saisi à 23h47 hors heures de marché ⚠️",
+    sql: "SELECT deal_id, anomaly_type, score\nFROM silver.anomalies\nWHERE DATE(detected_at) = CURRENT_DATE\nORDER BY score ASC",
+    pseudo_q: "Y a-t-il des anomalies détectées aujourd'hui ?"
+  },
+  'p&l': {
+    reponse: "Le P&L net journalier est de <strong>+920 000 MAD</strong> :\n• EUR/MAD : +1 240 000 MAD ✅\n• USD/MAD : -320 000 MAD\n• GBP/MAD : +180 000 MAD ✅\n• CHF/MAD : -180 000 MAD",
+    sql: "SELECT devise, SUM(pnl_brut) as pnl\nFROM gold.pnl_journalier\nWHERE date_trade = CURRENT_DATE\nGROUP BY devise",
+    pseudo_q: "Quel est le P&L net de la journée ?"
+  },
+  'deal': {
+    reponse: "245 deals ont été traités ce matin, dont 242 normaux et <strong>3 anomalies détectées</strong> automatiquement par le modèle Isolation Forest.",
+    sql: "SELECT COUNT(*) as total,\n  SUM(CASE WHEN statut='CONFIRMED' THEN 1 END) as ok\nFROM silver.deals_clean\nWHERE DATE(ts_silver) = CURRENT_DATE",
+    pseudo_q: "Combien de deals ont été traités ce matin ?"
+  }
+};
+
+function askQuestion(q) {
+  document.getElementById('chat-input').value = q;
+  sendMessage();
+}
+
+function sendMessage() {
+  const input = document.getElementById('chat-input');
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = '';
+
+  const box = document.getElementById('chat-box');
+
+  // User message
+  const userMsg = document.createElement('div');
+  userMsg.className = 'msg msg-user';
+  userMsg.textContent = q;
+  box.appendChild(userMsg);
+
+  // Find response
+  const qLower = q.toLowerCase();
+  let resp = AI_RESPONSES['deal'];
+  for (const [key, val] of Object.entries(AI_RESPONSES)) {
+    if (qLower.includes(key)) { resp = val; break; }
+  }
+
+  // Show pseudo flow
+  document.getElementById('pseudo-flow').innerHTML = `
+    <div style="font-size:11px;line-height:1.8;font-family:'IBM Plex Mono',monospace">
+      <div style="color:var(--ink-soft)">① Question originale :</div>
+      <div style="color:var(--ink);margin-bottom:8px">"${q}"</div>
+      <div style="color:var(--ink-soft)">② Pseudonymisée par StreamGuard :</div>
+      <div style="color:var(--red);margin-bottom:8px">"${resp.pseudo_q}"</div>
+      <div style="color:var(--ink-soft)">③ SQL généré par Mistral (anonymisé)</div>
+      <div style="color:var(--ink-soft)">④ Dremio exécute sur Gold Iceberg</div>
+      <div style="color:var(--ink-soft)">⑤ Réponse dépseudonymisée → employé</div>
+    </div>`;
+
+  document.getElementById('sql-panel').innerHTML =
+    `<span style="color:#7aa3c8">-- SQL généré par Mistral (pseudonymisé)</span>\n` +
+    `<span style="color:#a8d8a0">${resp.sql}</span>`;
+
+  // AI response with delay
+  setTimeout(() => {
+    const aiMsg = document.createElement('div');
+    aiMsg.className = 'msg msg-ai';
+    aiMsg.innerHTML = resp.reponse;
+    box.appendChild(aiMsg);
+    box.scrollTop = box.scrollHeight;
+  }, 900);
+
+  box.scrollTop = box.scrollHeight;
+}
+
+// Start with one deal
+setTimeout(generateDeal, 800);
+</script>
+</body>
+</html>

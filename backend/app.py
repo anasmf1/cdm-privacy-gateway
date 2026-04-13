@@ -1,23 +1,21 @@
 """
 CDM StreamGuard — FastAPI Backend
 ===================================
-API REST + WebSocket qui connecte :
-→ Kafka (deals temps réel)
-→ Dremio (données Gold)
-→ Ollama/Qwen (assistant IA)
-→ StreamGuard (métriques)
-→ MLflow (benchmark ML)
+Privacy Gateway intégré dans /api/ask
+Pattern ØllamØnym adapté Capital Markets CDM
+
+Flux /api/ask :
+  Question employé
+      ↓ pseudonymize_text()
+  Question avec tokens
+      ↓ Qwen génère SQL
+  SQL avec tokens
+      ↓ Dremio exécute
+  Données avec tokens
+      ↓ deanonymize()
+  Réponse avec vraies valeurs
 
 Auteur : Roui Anas — PFE EMI MIS 2026 — DSIG CDM
-
-Endpoints :
-  GET  /health              → statut de tous les services
-  GET  /api/metrics         → métriques StreamGuard
-  GET  /api/positions       → positions nettes Gold
-  GET  /api/pnl             → P&L journalier
-  GET  /api/anomalies       → anomalies détectées
-  POST /api/ask             → assistant IA
-  WS   /ws/stream           → deals temps réel WebSocket
 """
 
 import asyncio
@@ -25,17 +23,18 @@ import json
 import logging
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
-import redis.asyncio as aioredis
 import requests
 from confluent_kafka import Consumer, KafkaError
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from privacy_gateway import StreamGuardGateway
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,45 +43,37 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── CONFIGURATION ─────────────────────────────────────────────
-
+# ── CONFIG ────────────────────────────────────────────────────
 KAFKA_SERVERS  = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-REDIS_URL      = os.getenv("REDIS_URL",               "redis://localhost:6379")
-DREMIO_HOST    = os.getenv("DREMIO_HOST",             "localhost")
-DREMIO_PORT    = os.getenv("DREMIO_PORT",             "9047")
-DREMIO_USER    = os.getenv("DREMIO_USER",             "cdm_user")
-DREMIO_PASS    = os.getenv("DREMIO_PASSWORD",         "CDM_Dremio_2026!")
-OLLAMA_URL     = os.getenv("OLLAMA_URL",              "http://localhost:11434")
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",            "qwen2.5:7b-instruct")
-TOPIC_SECURE   = os.getenv("TOPIC_SECURE",            "cdm.sisdm.kondor.dbo.deals.secure")
-TOPIC_AUDIT    = os.getenv("TOPIC_AUDIT",             "cdm.streamguard.audit")
-ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY",       "")
-OPENAI_KEY     = os.getenv("OPENAI_API_KEY",          "")
+DB_URL         = os.getenv("DB_URL", "postgresql://cdm_user:CDM_PG_2026!@localhost:5432/cdm_metadata")
+DREMIO_HOST    = os.getenv("DREMIO_HOST",    "localhost")
+DREMIO_PORT    = os.getenv("DREMIO_PORT",    "9047")
+DREMIO_USER    = os.getenv("DREMIO_USER",    "cdm_user")
+DREMIO_PASS    = os.getenv("DREMIO_PASSWORD","CDM_Dremio_2026!")
+OLLAMA_URL     = os.getenv("OLLAMA_URL",     "http://localhost:11434")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL",   "qwen2.5:7b-instruct")
+TOPIC_SECURE   = os.getenv("TOPIC_SECURE",   "cdm.sisdm.kondor.dbo.deals.secure")
+ANTHROPIC_KEY  = os.getenv("ANTHROPIC_API_KEY", "")
 
 DREMIO_BASE = f"http://{DREMIO_HOST}:{DREMIO_PORT}"
 
 # ── WEBSOCKET MANAGER ─────────────────────────────────────────
-
 class ConnectionManager:
-    """Gère les connexions WebSocket actives."""
-
     def __init__(self):
         self.active: list[WebSocket] = []
 
     async def connect(self, ws: WebSocket):
         await ws.accept()
         self.active.append(ws)
-        logger.info(f"WebSocket connecté — total={len(self.active)}")
 
     def disconnect(self, ws: WebSocket):
-        self.active.remove(ws)
-        logger.info(f"WebSocket déconnecté — total={len(self.active)}")
+        if ws in self.active:
+            self.active.remove(ws)
 
     async def broadcast(self, data: dict):
-        """Envoie un message à tous les clients connectés."""
         if not self.active:
             return
-        msg = json.dumps(data, ensure_ascii=False, default=str)
+        msg  = json.dumps(data, ensure_ascii=False, default=str)
         dead = []
         for ws in self.active:
             try:
@@ -96,19 +87,14 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # ── DREMIO CLIENT ─────────────────────────────────────────────
-
 class DremioClient:
-    """Client pour l'API REST Dremio."""
-
     def __init__(self):
-        self._token: Optional[str] = None
-        self._token_expiry: float = 0
+        self._token       : Optional[str] = None
+        self._token_expiry: float         = 0
 
     def _get_token(self) -> str:
-        """Récupère ou renouvelle le token Dremio."""
         if self._token and time.time() < self._token_expiry:
             return self._token
-
         try:
             resp = requests.post(
                 f"{DREMIO_BASE}/apiv2/login",
@@ -116,7 +102,7 @@ class DremioClient:
                 timeout=10,
             )
             resp.raise_for_status()
-            self._token = resp.json()["token"]
+            self._token        = resp.json()["token"]
             self._token_expiry = time.time() + 3600
             return self._token
         except Exception as e:
@@ -124,110 +110,115 @@ class DremioClient:
             raise
 
     def query(self, sql: str) -> list[dict]:
-        """Exécute une requête SQL sur Dremio."""
-        token = self._get_token()
-        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            token   = self._get_token()
+            headers = {"Authorization": f"Bearer {token}"}
+            job     = requests.post(
+                f"{DREMIO_BASE}/api/v3/sql",
+                headers=headers,
+                json={"sql": sql},
+                timeout=30,
+            )
+            job.raise_for_status()
+            job_id = job.json()["id"]
 
-        # Soumettre le job
-        job_resp = requests.post(
-            f"{DREMIO_BASE}/api/v3/sql",
-            headers=headers,
-            json={"sql": sql},
-            timeout=30,
-        )
-        job_resp.raise_for_status()
-        job_id = job_resp.json()["id"]
+            for _ in range(60):
+                status_r = requests.get(
+                    f"{DREMIO_BASE}/api/v3/job/{job_id}",
+                    headers=headers,
+                    timeout=10,
+                )
+                state = status_r.json().get("jobState")
+                if state == "COMPLETED":
+                    break
+                if state == "FAILED":
+                    raise Exception(f"Dremio job failed")
+                time.sleep(0.5)
 
-        # Attendre la fin
-        for _ in range(60):
-            status_resp = requests.get(
-                f"{DREMIO_BASE}/api/v3/job/{job_id}",
+            res = requests.get(
+                f"{DREMIO_BASE}/api/v3/job/{job_id}/results",
                 headers=headers,
                 timeout=10,
             )
-            state = status_resp.json().get("jobState")
-            if state == "COMPLETED":
-                break
-            if state == "FAILED":
-                raise Exception(f"Dremio job failed: {status_resp.json()}")
-            time.sleep(0.5)
-
-        # Récupérer les résultats
-        results_resp = requests.get(
-            f"{DREMIO_BASE}/api/v3/job/{job_id}/results",
-            headers=headers,
-            timeout=10,
-        )
-        results_resp.raise_for_status()
-        return results_resp.json().get("rows", [])
+            return res.json().get("rows", [])
+        except Exception as e:
+            logger.warning(f"Dremio query failed: {e}")
+            return []
 
 
 dremio = DremioClient()
 
-# ── OLLAMA CLIENT ─────────────────────────────────────────────
-
-def call_ollama(prompt: str, model: str = OLLAMA_MODEL) -> str:
-    """Appelle Ollama (Qwen ou Mistral) en local."""
+# ── OLLAMA / QWEN ─────────────────────────────────────────────
+def call_ollama(prompt: str) -> str:
     try:
         resp = requests.post(
             f"{OLLAMA_URL}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False},
+            json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False},
             timeout=60,
         )
         resp.raise_for_status()
         return resp.json()["response"].strip()
     except Exception as e:
         logger.error(f"Ollama error: {e}")
-        return f"Erreur LLM : {e}"
+        return ""
 
 
-def generate_sql(question: str) -> str:
-    """Génère le SQL depuis une question en français via Qwen."""
+def generate_sql(question_pseudo: str) -> str:
+    """
+    Qwen génère le SQL à partir de la question pseudonymisée.
+    Les tokens CDM sont dans la question — Qwen les utilise dans le SQL.
+    """
     prompt = f"""Tu es un expert SQL pour la Salle des Marchés du Crédit du Maroc.
 
-Tables disponibles dans gold layer (Dremio) :
+Tables disponibles (Dremio — Gold Layer) :
 - gold.positions_nettes  : devise, position_mad, nb_deals, derniere_maj
 - gold.pnl_journalier    : date_trade, devise, pnl_brut, nb_deals
 - gold.mtm_intraday      : deal_id, taux, taux_marche, mtm_value, devise
 - silver.deals_clean     : deal_id, montant, taux, devise, trader, ts_silver
 - silver.anomalies       : deal_id, anomaly_type, score, detected_at
 
-Question : "{question}"
+IMPORTANT : Les valeurs dans la question sont des tokens pseudonymisés.
+Utilise-les exactement tels quels dans le SQL.
 
-Génère UNIQUEMENT la requête SQL. Rien d'autre. Pas d'explication."""
+Question : "{question_pseudo}"
+
+Génère UNIQUEMENT la requête SQL. Rien d'autre."""
 
     return call_ollama(prompt)
 
 
-def format_response(question: str, data: list, sql: str) -> str:
-    """Formate la réponse en français naturel via Qwen."""
+def format_response(question_orig: str, data: list) -> str:
+    """
+    Qwen formate la réponse finale en français.
+    La question originale et les données sont dépseudonymisées.
+    """
+    if not data:
+        return "Aucune donnée trouvée pour cette requête."
+
     prompt = f"""Tu es l'assistant IA de la Salle des Marchés du Crédit du Maroc.
 
-Question posée : "{question}"
-Données récupérées : {json.dumps(data, ensure_ascii=False, default=str)}
+Question posée : "{question_orig}"
+Données : {json.dumps(data, ensure_ascii=False, default=str)}
 
 Formule une réponse claire et naturelle en français.
-Sois précis avec les chiffres. Pas de JSON. Pas de SQL. Juste une réponse humaine."""
+Sois précis avec les chiffres. Pas de JSON. Pas de SQL."""
 
-    return call_ollama(prompt)
+    result = call_ollama(prompt)
+    if not result:
+        return f"Données récupérées : {json.dumps(data, default=str)}"
+    return result
 
 
 # ── KAFKA CONSUMER ASYNC ──────────────────────────────────────
-
 async def kafka_stream_task():
-    """
-    Tâche asyncio qui consomme le topic sécurisé Kafka
-    et pousse chaque deal vers les WebSockets connectés.
-    """
     consumer = Consumer({
-        "bootstrap.servers"  : KAFKA_SERVERS,
-        "group.id"           : "cdm-backend-stream",
-        "auto.offset.reset"  : "latest",
-        "enable.auto.commit" : True,
+        "bootstrap.servers" : KAFKA_SERVERS,
+        "group.id"          : "cdm-backend-stream",
+        "auto.offset.reset" : "latest",
+        "enable.auto.commit": True,
     })
-    consumer.subscribe([TOPIC_SECURE, TOPIC_AUDIT])
-    logger.info(f"Kafka consumer démarré — topics={TOPIC_SECURE}, {TOPIC_AUDIT}")
-
+    consumer.subscribe([TOPIC_SECURE])
+    logger.info(f"Kafka consumer started — topic={TOPIC_SECURE}")
     loop = asyncio.get_event_loop()
 
     try:
@@ -235,79 +226,47 @@ async def kafka_stream_task():
             msg = await loop.run_in_executor(
                 None, lambda: consumer.poll(timeout=0.1)
             )
-
             if msg is None:
                 await asyncio.sleep(0.05)
                 continue
-
             if msg.error():
                 if msg.error().code() != KafkaError._PARTITION_EOF:
                     logger.error(f"Kafka error: {msg.error()}")
                 continue
-
             try:
                 payload = json.loads(msg.value().decode("utf-8"))
-                topic   = msg.topic()
+                debezium = payload.get("payload", payload)
+                deal     = debezium.get("after", debezium)
 
-                # Détermine le type de message
-                event_type = "deal" if TOPIC_SECURE in topic else "audit"
-
-                # Extrait le deal depuis le format Debezium
-                if event_type == "deal":
-                    debezium = payload.get("payload", payload)
-                    deal     = debezium.get("after", debezium)
-                    event    = {
-                        "type"      : "deal",
-                        "deal"      : deal,
-                        "offset"    : msg.offset(),
-                        "partition" : msg.partition(),
-                        "timestamp" : datetime.now().isoformat(),
-                    }
-                else:
-                    event = {
-                        "type"      : "audit",
-                        "audit"     : payload,
-                        "timestamp" : datetime.now().isoformat(),
-                    }
-
-                # Broadcast à tous les dashboards connectés
-                await manager.broadcast(event)
-
-                # Sauvegarde dans Redis pour les nouveaux clients
-                redis_client = aioredis.from_url(REDIS_URL)
-                if event_type == "deal":
-                    await redis_client.lpush("recent_deals", json.dumps(event))
-                    await redis_client.ltrim("recent_deals", 0, 49)
-                await redis_client.aclose()
-
+                await manager.broadcast({
+                    "type"     : "deal",
+                    "deal"     : deal,
+                    "offset"   : msg.offset(),
+                    "timestamp": time.time(),
+                })
             except Exception as e:
                 logger.error(f"Message processing error: {e}")
-
     finally:
         consumer.close()
 
 
 # ── LIFESPAN ──────────────────────────────────────────────────
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Démarre les tâches background au démarrage."""
     task = asyncio.create_task(kafka_stream_task())
-    logger.info("StreamGuard backend démarré ✅")
+    logger.info("CDM StreamGuard Backend started ✅")
     yield
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
-    logger.info("StreamGuard backend arrêté")
 
 
 # ── FASTAPI APP ───────────────────────────────────────────────
-
 app = FastAPI(
     title       = "CDM StreamGuard API",
-    description = "Backend API pour le dashboard Capital Markets CDM",
+    description = "Privacy-First Capital Markets Intelligence — CDM DSIG",
     version     = "1.0.0",
     lifespan    = lifespan,
 )
@@ -321,27 +280,27 @@ app.add_middleware(
 )
 
 # ── MODELS ────────────────────────────────────────────────────
-
 class AskRequest(BaseModel):
-    question: str
-    model: str = "qwen"  # "qwen", "mistral", "claude", "gpt4"
-
+    question  : str
+    model     : str = "qwen"
+    session_id: str = "default"
 
 class AskResponse(BaseModel):
-    question: str
-    question_pseudo: str
-    sql: str
-    data: list
-    response: str
-    model_used: str
-    latency_ms: float
-
+    question        : str
+    question_pseudo : str
+    sql             : str
+    data_raw        : list
+    data_real       : list
+    response        : str
+    model_used      : str
+    latency_ms      : float
+    entities_found  : int
 
 # ── ROUTES ────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
-    """Vérifie le statut de tous les services."""
+    """Statut de tous les services."""
     services = {}
 
     # Kafka
@@ -352,15 +311,6 @@ async def health():
         services["kafka"] = "ok"
     except Exception as e:
         services["kafka"] = f"error: {e}"
-
-    # Redis
-    try:
-        r = aioredis.from_url(REDIS_URL)
-        await r.ping()
-        await r.aclose()
-        services["redis"] = "ok"
-    except Exception as e:
-        services["redis"] = f"error: {e}"
 
     # Dremio
     try:
@@ -373,7 +323,7 @@ async def health():
     try:
         resp = requests.get(f"{OLLAMA_URL}/api/tags", timeout=3)
         models = [m["name"] for m in resp.json().get("models", [])]
-        services["ollama"] = f"ok — models: {models}"
+        services["ollama"] = f"ok — {models}"
     except Exception as e:
         services["ollama"] = f"error: {e}"
 
@@ -384,146 +334,98 @@ async def health():
     )
 
 
-@app.get("/api/metrics")
-async def get_metrics():
-    """Métriques StreamGuard depuis Redis."""
-    try:
-        r = aioredis.from_url(REDIS_URL)
-        raw = await r.get("streamguard:metrics")
-        await r.aclose()
-        if raw:
-            return json.loads(raw)
-    except Exception as e:
-        logger.warning(f"Redis metrics error: {e}")
-
-    # Fallback données simulées si StreamGuard pas encore connecté
-    return {
-        "deals_processed"   : 0,
-        "entities_detected" : 0,
-        "avg_latency_ms"    : 0,
-        "anomalies"         : 0,
-        "status"            : "waiting",
-    }
-
-
 @app.get("/api/positions")
 async def get_positions():
-    """Positions nettes depuis Gold Iceberg via Dremio."""
     try:
-        sql = """
-            SELECT
-                devise,
-                position_mad,
-                nb_deals,
-                derniere_maj
-            FROM CDM_DATALAKE.gold.positions_nettes
-            WHERE DATE(derniere_maj) = CURRENT_DATE
-            ORDER BY position_mad DESC
-        """
+        sql  = "SELECT devise, position_mad, nb_deals FROM CDM_DATALAKE.gold.positions_nettes WHERE DATE(derniere_maj) = CURRENT_DATE ORDER BY position_mad DESC"
         data = dremio.query(sql)
-        return {"positions": data, "source": "dremio_live"}
+        return {"positions": data, "source": "dremio"}
     except Exception as e:
-        logger.warning(f"Dremio positions error: {e}")
-        # Données démo si Dremio pas encore configuré
-        return {
-            "positions": [
-                {"devise": "EUR/MAD", "position_mad": 490350000, "nb_deals": 12},
-                {"devise": "USD/MAD", "position_mad": 120240000, "nb_deals": 4},
-                {"devise": "GBP/MAD", "position_mad": 91200000,  "nb_deals": 3},
-            ],
-            "source": "demo",
-        }
+        return {"positions": [
+            {"devise": "EUR/MAD", "position_mad": 490350000, "nb_deals": 12},
+            {"devise": "USD/MAD", "position_mad": 120240000, "nb_deals": 4},
+        ], "source": "demo"}
 
 
 @app.get("/api/pnl")
 async def get_pnl():
-    """P&L journalier depuis Gold Iceberg via Dremio."""
     try:
-        sql = """
-            SELECT
-                devise,
-                SUM(pnl_brut) AS pnl_total,
-                COUNT(deal_id) AS nb_deals
-            FROM CDM_DATALAKE.gold.pnl_journalier
-            WHERE date_trade = CURRENT_DATE
-            GROUP BY devise
-            ORDER BY pnl_total DESC
-        """
+        sql  = "SELECT devise, SUM(pnl_brut) AS pnl_total FROM CDM_DATALAKE.gold.pnl_journalier WHERE date_trade = CURRENT_DATE GROUP BY devise"
         data = dremio.query(sql)
-        return {"pnl": data, "source": "dremio_live"}
+        return {"pnl": data, "source": "dremio"}
     except Exception as e:
-        logger.warning(f"Dremio PNL error: {e}")
-        return {
-            "pnl": [
-                {"devise": "EUR/MAD", "pnl_total": 1240000,  "nb_deals": 12},
-                {"devise": "USD/MAD", "pnl_total": -320000,  "nb_deals": 4},
-                {"devise": "GBP/MAD", "pnl_total": 180000,   "nb_deals": 3},
-                {"devise": "CHF/MAD", "pnl_total": -180000,  "nb_deals": 2},
-            ],
-            "source": "demo",
-        }
+        return {"pnl": [
+            {"devise": "EUR/MAD", "pnl_total":  1240000},
+            {"devise": "USD/MAD", "pnl_total": -320000},
+        ], "source": "demo"}
 
 
 @app.get("/api/anomalies")
 async def get_anomalies():
-    """Anomalies détectées depuis Silver Iceberg via Dremio."""
     try:
-        sql = """
-            SELECT
-                deal_id,
-                anomaly_type,
-                score,
-                detected_at
-            FROM CDM_DATALAKE.silver.anomalies
-            WHERE DATE(detected_at) = CURRENT_DATE
-            ORDER BY score ASC
-            LIMIT 20
-        """
+        sql  = "SELECT deal_id, anomaly_type, score, detected_at FROM CDM_DATALAKE.silver.anomalies WHERE DATE(detected_at) = CURRENT_DATE ORDER BY score ASC LIMIT 20"
         data = dremio.query(sql)
-        return {"anomalies": data, "source": "dremio_live"}
+        return {"anomalies": data, "source": "dremio"}
     except Exception as e:
-        logger.warning(f"Dremio anomalies error: {e}")
-        return {
-            "anomalies": [
-                {"deal_id": "DEAL_a3f9", "anomaly_type": "RATE_OUTLIER",   "score": -0.91},
-                {"deal_id": "DEAL_b2e1", "anomaly_type": "AMOUNT_OUTLIER", "score": -0.85},
-                {"deal_id": "DEAL_c4d7", "anomaly_type": "OFF_HOURS",      "score": -0.78},
-            ],
-            "source": "demo",
-        }
+        return {"anomalies": [
+            {"deal_id": "DEAL_a3f9", "anomaly_type": "RATE_OUTLIER",   "score": -0.91},
+            {"deal_id": "DEAL_b2e1", "anomaly_type": "AMOUNT_OUTLIER", "score": -0.85},
+        ], "source": "demo"}
 
 
 @app.post("/api/ask", response_model=AskResponse)
 async def ask(request: AskRequest):
     """
     Assistant IA Privacy-First.
-    Question → StreamGuard pseudo → Qwen SQL → Dremio → Réponse FR
+
+    Flux complet — Pattern ØllamØnym adapté CDM :
+
+    1. StreamGuard pseudonymise la question
+    2. Qwen génère le SQL avec les tokens
+    3. Dremio exécute le SQL
+    4. StreamGuard dépseudonymise les résultats
+    5. Qwen formate la réponse finale en français
     """
-    t_start = time.time()
-    question = request.question
+    t_start  = time.time()
+    question = request.question.strip()
 
-    # Pseudonymisation basique de la question
-    # (StreamGuard complet sera intégré en Phase 2)
-    question_pseudo = question
+    # ── Étape 1 : Pseudonymise la question ───────────────────
+    session_id = request.session_id or f"sess_{uuid.uuid4().hex[:8]}"
+    gateway    = StreamGuardGateway(session_id=session_id)
 
-    # Générer le SQL via le modèle choisi
+    question_pseudo, mapping = gateway.pseudonymize(question)
+
+    logger.info(
+        f"Question pseudonymisée — "
+        f"{len(mapping)} entités — "
+        f"session={session_id}"
+    )
+    logger.info(f"Original  : {question}")
+    logger.info(f"Pseudo    : {question_pseudo}")
+
+    # ── Étape 2 : Qwen génère le SQL ─────────────────────────
     if request.model == "claude" and ANTHROPIC_KEY:
-        sql, model_used = await _ask_claude(question_pseudo), "claude-3-5-sonnet"
-    elif request.model == "gpt4" and OPENAI_KEY:
-        sql, model_used = await _ask_openai(question_pseudo), "gpt-4o"
+        sql        = await _ask_claude(question_pseudo)
+        model_used = "claude-sonnet-4-6"
     else:
         sql        = generate_sql(question_pseudo)
         model_used = OLLAMA_MODEL
 
-    # Exécuter sur Dremio
-    try:
-        data = dremio.query(sql)
-    except Exception as e:
-        data = []
-        logger.warning(f"SQL execution failed: {e}")
+    # Nettoyage du SQL généré
+    sql = sql.strip().strip("```sql").strip("```").strip()
+    logger.info(f"SQL généré : {sql}")
 
-    # Formater la réponse en français
-    response = format_response(question, data, sql)
+    # ── Étape 3 : Dremio exécute ──────────────────────────────
+    data_raw = dremio.query(sql) if sql else []
+
+    # ── Étape 4 : Dépseudonymise les résultats ────────────────
+    data_real = gateway.deanonymize_data(data_raw, mapping)
+
+    logger.info(f"Données brutes : {data_raw}")
+    logger.info(f"Données réelles : {data_real}")
+
+    # ── Étape 5 : Formate la réponse en français ──────────────
+    response = format_response(question, data_real)
 
     latency_ms = (time.time() - t_start) * 1000
 
@@ -531,61 +433,39 @@ async def ask(request: AskRequest):
         question        = question,
         question_pseudo = question_pseudo,
         sql             = sql,
-        data            = data,
+        data_raw        = data_raw,
+        data_real       = data_real,
         response        = response,
         model_used      = model_used,
         latency_ms      = round(latency_ms, 2),
+        entities_found  = len(mapping),
     )
 
 
 async def _ask_claude(prompt: str) -> str:
-    """Appelle l'API Anthropic Claude."""
+    """Appelle Claude API via StreamGuard Gateway."""
     import anthropic
-    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    client  = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
     message = client.messages.create(
         model      = "claude-sonnet-4-6",
-        max_tokens = 1000,
+        max_tokens = 500,
         messages   = [{"role": "user", "content": prompt}],
     )
     return message.content[0].text
 
 
-async def _ask_openai(prompt: str) -> str:
-    """Appelle l'API OpenAI GPT-4o."""
-    import openai
-    client = openai.OpenAI(api_key=OPENAI_KEY)
-    resp = client.chat.completions.create(
-        model    = "gpt-4o",
-        messages = [{"role": "user", "content": prompt}],
-    )
-    return resp.choices[0].message.content
-
-
 # ── WEBSOCKET ─────────────────────────────────────────────────
-
 @app.websocket("/ws/stream")
 async def websocket_stream(websocket: WebSocket):
     """
     WebSocket temps réel.
-    Le dashboard React se connecte ici.
+    Le dashboard Next.js se connecte ici.
     Chaque deal pseudonymisé depuis Kafka
     est poussé instantanément.
     """
     await manager.connect(websocket)
-
-    # Envoie les 10 derniers deals au nouveau client
-    try:
-        r = aioredis.from_url(REDIS_URL)
-        recent = await r.lrange("recent_deals", 0, 9)
-        await r.aclose()
-        for raw in reversed(recent):
-            await websocket.send_text(raw.decode())
-    except Exception:
-        pass
-
     try:
         while True:
-            # Garde la connexion alive
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text("pong")
@@ -594,13 +474,6 @@ async def websocket_stream(websocket: WebSocket):
 
 
 # ── ENTRY POINT ───────────────────────────────────────────────
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "app:app",
-        host       = "0.0.0.0",
-        port       = 8000,
-        reload     = True,
-        log_level  = "info",
-    )
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)

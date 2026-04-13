@@ -1,0 +1,60 @@
+@startuml 05_Zoom_ML_Anomaly
+title Zoom ⑨ — Machine Learning · Anomaly Detection\nIsolation Forest vs Autoencoder + MLflow
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundcorner 8
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantFontSize 12
+skinparam sequenceMessageFontSize 11
+skinparam noteBackgroundColor #FFF9E6
+
+participant "Silver Layer\ndeals_clean" as SILVER #FFF9E6
+participant "anomaly_detector.py" as DETECT #F0E8FF
+participant "Isolation Forest\n(Scikit-learn)" as IF #E8E0FF
+participant "Autoencoder\n(PyTorch)" as AE #E8E0FF
+participant "MLflow\nTracking" as MLFLOW #EAF3FB
+database    "Silver Layer\nanomalies" as ANOM #FFE8E8
+
+SILVER -> DETECT : load deals\n(taux, montant, heure, spread)
+activate DETECT
+
+DETECT -> DETECT : feature engineering\n(volume_relatif, taux_zscore, heure_nuit)
+DETECT -> DETECT : StandardScaler\nnormalize features
+
+group Training Isolation Forest
+  DETECT -> IF    : fit(X_train)\nn_estimators=200\ncontamination=0.05
+  activate IF
+  IF     --> DETECT : model trained
+  deactivate IF
+  DETECT -> MLFLOW : log params + metrics\nF1=0.89 · Precision=0.91 · Recall=0.87
+  DETECT -> MLFLOW : register model\nCDM_AnomalyDetector_IsolationForest
+end
+
+group Training Autoencoder
+  DETECT -> AE    : fit(X_normal_only)\nArchitecture: 7→16→8→4→8→16→7\nepochs=50
+  activate AE
+  AE     --> DETECT : model trained\nthreshold=95th percentile
+  deactivate AE
+  DETECT -> MLFLOW : log params + metrics\nF1=0.84 · Precision=0.86 · Recall=0.82
+  DETECT -> MLFLOW : register model\nCDM_AnomalyDetector_Autoencoder
+end
+
+group Production Inference
+  DETECT -> IF    : predict(new_deal)
+  activate IF
+  IF     --> DETECT : score=-0.91 → ANOMALY\ntype=RATE_OUTLIER
+  deactivate IF
+  DETECT -> ANOM  : write anomaly\n{deal_id, type, score, detected_at}
+end
+
+deactivate DETECT
+
+note over SILVER, ANOM
+  Isolation Forest retenu en production
+  F1 +5.9% · Inférence ×9 plus rapide (2ms vs 18ms)
+  MLflow Model Registry : version production tracée
+end note
+
+@enduml

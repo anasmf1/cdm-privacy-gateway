@@ -1,0 +1,159 @@
+@startuml StreamGuard_Sequence_Diagram
+
+title StreamGuard — Flux de Pseudonymisation\nCrédit du Maroc DSIG — PFE Roui Anas 2026
+
+skinparam backgroundColor #FAFAFA
+skinparam sequenceArrowThickness 1.5
+skinparam roundcorner 8
+skinparam sequenceParticipantBorderThickness 1.5
+skinparam sequenceParticipantFontSize 13
+skinparam sequenceMessageFontSize 12
+skinparam sequenceGroupFontSize 12
+skinparam sequenceGroupBorderThickness 1
+skinparam noteFontSize 11
+skinparam noteBackgroundColor #FFF9E6
+skinparam noteBorderColor #D4A017
+
+skinparam participant {
+  BackgroundColor #EAF3FB
+  BorderColor #1A66D4
+  FontColor #003087
+  FontStyle bold
+}
+
+skinparam actor {
+  BackgroundColor #E8F4E8
+  BorderColor #15A356
+  FontColor #0A7C42
+}
+
+' ── PARTICIPANTS ─────────────────────────────────────
+actor       "Employé CDM\n(Back Office)"        as USER
+participant "KONDOR+\n(SQL Server)"              as KONDOR
+participant "Debezium\n(CDC)"                    as DEB
+participant "Kafka\ntopic.raw"                   as KAFKA_RAW  #FFE8E8
+participant "StreamGuard\n(Privacy Gateway)"     as SG         #FFF0F0
+database    "PostgreSQL\n(Mapping Table)"        as PG         #FFF9E6
+participant "Kafka\ntopic.secure"                as KAFKA_SEC  #E8F4E8
+participant "Apache Flink\n(Stream Processing)"  as FLINK
+database    "Apache Iceberg\n(Bronze/Silver/Gold)" as ICEBERG
+participant "Dremio\n(SQL Engine)"               as DREMIO
+participant "Qwen 2.5 7B\n(Ollama Local)"        as QWEN       #F0E8FF
+
+' ════════════════════════════════════════════════════
+' PARTIE 1 — PIPELINE KAFKA TEMPS RÉEL
+' ════════════════════════════════════════════════════
+
+== Partie 1 — Pipeline Kafka temps réel ==
+
+KONDOR -> DEB : INSERT INTO dbo.deals\n(CDM-08547, TRADER_01, 10M MAD, EUR/MAD)
+activate DEB
+DEB -> KAFKA_RAW : Publish CDC event\n{ op: "c", after: {deal brut} }
+deactivate DEB
+
+activate KAFKA_RAW
+KAFKA_RAW -> SG : Consume topic.raw\n(deal avec données sensibles)
+deactivate KAFKA_RAW
+
+activate SG
+
+group Détection des entités [Hybrid Detection]
+  SG -> SG : Regex : DEAL_ID, CCY, AMT, RATE, IBAN, SWIFT
+  note right of SG
+    CDM-08547    → pattern DEAL
+    EUR/MAD      → pattern CCY
+    10,000,000   → pattern AMT
+    10.9100      → pattern RATE
+  end note
+  SG -> QWEN : Detect ambiguous entities\n("Attijariwafa Bank", "TRADER_01")
+  activate QWEN
+  QWEN --> SG : { ENTITY: "Attijariwafa", TRADER: "TRADER_01" }
+  deactivate QWEN
+end
+
+group Génération des tokens [HMAC-SHA256]
+  SG -> SG : token = HMAC(secret, session_id + entity + value)
+  note right of SG
+    CDM-08547    → DEAL_a3f9
+    TRADER_01    → TRADER_b2e1
+    Attijariwafa → ENTITY_c4d7
+    EUR/MAD      → CCY_ab12
+    10,000,000   → AMT_d1e2
+    10.9100      → RATE_e5f3
+  end note
+end
+
+SG -> PG : Store mapping\n{ token → original, session_id, expiry }
+activate PG
+PG --> SG : OK
+deactivate PG
+
+SG -> KAFKA_SEC : Publish pseudonymized deal\n{ DEAL_a3f9, TRADER_b2e1, CCY_ab12... }
+deactivate SG
+
+SG -> KAFKA_SEC : Publish audit log\n{ timestamp, nb_entities, compliance: BAM_N5 }
+
+activate KAFKA_SEC
+KAFKA_SEC -> FLINK : Consume topic.secure
+deactivate KAFKA_SEC
+
+activate FLINK
+FLINK -> ICEBERG : Write Bronze layer\n(pseudonymized deals)
+FLINK -> ICEBERG : Transform Silver layer\n(cleaned + ML anomaly scores)
+FLINK -> ICEBERG : Aggregate Gold layer\n(positions_nettes, pnl_journalier)
+deactivate FLINK
+
+' ════════════════════════════════════════════════════
+' PARTIE 2 — ASSISTANT IA PRIVACY-FIRST
+' ════════════════════════════════════════════════════
+
+== Partie 2 — Assistant IA Privacy-First ==
+
+USER -> SG : Question en français\n"Quelle est la position EUR/MAD ?"
+activate SG
+
+group Pseudonymisation de la question [StreamGuard Gateway]
+  SG -> PG : Lookup mapping\n{ EUR/MAD → CCY_ab12 }
+  activate PG
+  PG --> SG : { CCY_ab12: "EUR/MAD" }
+  deactivate PG
+  SG -> SG : Replace entities in question\n"Position CCY_ab12 ?"
+end
+
+SG -> QWEN : Generate SQL (pseudonymized question)\n"Quelle est la position CCY_ab12 ?"
+activate QWEN
+QWEN --> SG : SELECT devise, position_mad\nFROM gold.positions_nettes\nWHERE devise = 'CCY_ab12'
+deactivate QWEN
+
+SG -> DREMIO : Execute SQL with tokens
+activate DREMIO
+DREMIO -> ICEBERG : Query Gold Layer\n(pseudonymized data)
+activate ICEBERG
+ICEBERG --> DREMIO : { devise: CCY_ab12, position_mad: 490350000 }
+deactivate ICEBERG
+DREMIO --> SG : Raw results with tokens
+deactivate DREMIO
+
+group Dépseudonymisation [StreamGuard Gateway]
+  SG -> PG : Lookup reverse mapping\n{ CCY_ab12 → EUR/MAD }
+  activate PG
+  PG --> SG : { "EUR/MAD": 490350000 }
+  deactivate PG
+  SG -> SG : Replace tokens with real values\n{ devise: EUR/MAD, position_mad: 490350000 }
+end
+
+SG -> QWEN : Format response (real question + real data)\nQuestion: "Position EUR/MAD ?"\nDonnées: EUR/MAD | 490 350 000 MAD
+activate QWEN
+QWEN --> SG : "La position nette EUR/MAD est de\n490 350 000 MAD sur 12 deals confirmés."
+deactivate QWEN
+
+SG --> USER : Réponse finale en français\n"La position nette EUR/MAD est de 490 350 000 MAD"
+deactivate SG
+
+note over USER, QWEN
+  Qwen ne voit jamais les vraies valeurs CDM
+  Conformité BAM N°5/G/2022 garantie
+  Données ne quittent jamais le datacenter CDM
+end note
+
+@enduml

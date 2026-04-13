@@ -1,0 +1,73 @@
+@startuml 06_Zoom_Assistant_IA
+title Zoom ⑩⑪ — Assistant IA Privacy-First\nPrivacy Gateway · Text-to-SQL · CDM Desk
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundcorner 8
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantFontSize 12
+skinparam sequenceMessageFontSize 11
+skinparam noteBackgroundColor #FFF9E6
+skinparam noteBorderColor #D4A017
+
+actor       "Employé CDM\n(Back Office)" as USER
+participant "CDM Desk\n(Next.js)" as FRONT  #EAF3FB
+participant "FastAPI\nBackend" as API    #EAF3FB
+participant "Privacy Gateway\n(privacy_gateway.py)" as GW #FFD0D0
+database    "Mapping\n(PostgreSQL)" as MAP   #FFF9E6
+participant "Qwen 2.5 7B ①\n(SQL Generation)" as QWEN1 #F0E8FF
+participant "Dremio\n(SQL Engine)" as DREMIO #FFF9E6
+participant "Qwen 2.5 7B ②\n(Response Format)" as QWEN2 #F0E8FF
+
+USER  -> FRONT  : "Quelle est la position EUR/MAD ?"
+FRONT -> API    : POST /api/ask\n{question: "Position EUR/MAD ?"}
+
+activate API
+
+API   -> GW     : pseudonymize(question)
+activate GW
+GW    -> MAP    : lookup {EUR/MAD → CCY_ab12}
+MAP   --> GW    : mapping {CCY_ab12: "EUR/MAD"}
+GW    --> API   : pseudo_question="Position CCY_ab12 ?"\nmapping={CCY_ab12: EUR/MAD}
+deactivate GW
+
+note right of GW
+  Qwen ① ne voit jamais
+  les vraies valeurs CDM
+end note
+
+API   -> QWEN1  : generate_sql("Position CCY_ab12 ?")
+activate QWEN1
+QWEN1 --> API   : SELECT devise, position_mad\nFROM gold.positions_nettes\nWHERE devise = 'CCY_ab12'
+deactivate QWEN1
+
+API   -> DREMIO : execute SQL\nWHERE devise = 'CCY_ab12'
+activate DREMIO
+DREMIO --> API  : [{devise:CCY_ab12, position_mad:490350000}]
+deactivate DREMIO
+
+API   -> GW     : deanonymize_data(results, mapping)
+activate GW
+GW    -> MAP    : reverse lookup {CCY_ab12 → EUR/MAD}
+MAP   --> GW    : {EUR/MAD: 490350000}
+GW    --> API   : [{devise:EUR/MAD, position_mad:490350000}]
+deactivate GW
+
+API   -> QWEN2  : format_response(\n  question="Position EUR/MAD ?",\n  data=[{EUR/MAD: 490350000}]\n)
+activate QWEN2
+QWEN2 --> API   : "La position nette EUR/MAD est de\n490 350 000 MAD sur 12 deals confirmés."
+deactivate QWEN2
+
+API   --> FRONT : {response: "490 350 000 MAD", sql, latency_ms}
+deactivate API
+
+FRONT --> USER  : "La position EUR/MAD : 490 350 000 MAD"
+
+note over USER, QWEN2
+  Qwen ① : reçoit tokens anonymes → génère SQL
+  Qwen ② : reçoit vraies valeurs déjà dépseudonymisées → formate
+  Données CDM ne quittent jamais le datacenter
+end note
+
+@enduml

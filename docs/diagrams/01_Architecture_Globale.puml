@@ -1,0 +1,97 @@
+@startuml 01_Architecture_Globale
+title CDM StreamGuard — Architecture Globale\nCrédit du Maroc · DSIG · PFE Roui Anas 2026
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundcorner 8
+skinparam arrowThickness 1.5
+skinparam arrowFontSize 10
+skinparam packageBorderThickness 1.5
+skinparam packageFontSize 13
+skinparam packageFontStyle bold
+skinparam componentBorderThickness 1.2
+skinparam databaseBorderThickness 1.2
+
+skinparam component {
+  BackgroundColor #EAF3FB
+  BorderColor #1A66D4
+  FontColor #003087
+  FontStyle bold
+}
+
+skinparam database {
+  BackgroundColor #FFF9E6
+  BorderColor #D4A017
+  FontColor #412402
+  FontStyle bold
+}
+
+package "① Source" #EAF3FB {
+  component "KONDOR+\nSQL Server" as KONDOR
+}
+
+package "② Ingestion CDC" #E8F4E8 {
+  component "Debezium 2.5" as DEB
+}
+
+package "③ Messagerie" #FFF0F0 {
+  component "Apache Kafka 7.6\ntopic.raw" as KAFKA_RAW #FFE8E8
+  component "Apache Kafka 7.6\ntopic.secure" as KAFKA_SEC #E8F4E8
+}
+
+package "④ Privacy Layer" #FFE8E8 {
+  component "StreamGuard\n(Contribution originale)" as SG #FFD0D0
+  database "Mapping\nPostgreSQL" as MAP
+}
+
+package "⑤ Stream Processing" #E8F4E8 {
+  component "Apache Flink 1.19" as FLINK
+}
+
+package "⑥ DataLake" #FFF9E6 {
+  database "Iceberg Bronze\n(raw)" as BRONZE
+  database "Iceberg Silver\n(cleaned)" as SILVER
+  database "Iceberg Gold\n(aggregated)" as GOLD
+}
+
+package "⑦ Transformation" #F0F8E8 {
+  component "dbt Core" as DBT
+}
+
+package "⑧ Query Engine" #EAF3FB {
+  component "Dremio 24" as DREMIO
+}
+
+package "⑨ Machine Learning" #F0E8FF {
+  component "Isolation Forest\n+ Autoencoder" as ML
+  component "MLflow 2.12" as MLFLOW
+}
+
+package "⑩ LLM Local" #F5F0FF {
+  component "Qwen 2.5 7B\nOllama" as QWEN
+}
+
+package "⑪ Application" #EAF3FB {
+  component "FastAPI\nBackend" as API
+  component "Next.js\nDashboard" as FRONT
+}
+
+KONDOR     -down-> DEB        : CDC events
+DEB        -down-> KAFKA_RAW  : publish
+KAFKA_RAW  -down-> SG         : consume raw
+SG         -down-> MAP        : store mapping
+SG         -down-> KAFKA_SEC  : publish secure
+KAFKA_SEC  -down-> FLINK      : consume
+FLINK      -down-> BRONZE     : write
+BRONZE     -right-> DBT       : transform
+DBT        -down-> SILVER     : clean
+SILVER     -right-> ML        : anomaly detect
+ML         -right-> MLFLOW    : track
+DBT        -down-> GOLD       : aggregate
+GOLD       -down-> DREMIO     : query
+DREMIO     -down-> API        : REST
+API        -right-> FRONT     : WS + REST
+SILVER     -right-> DREMIO    : query
+
+@enduml

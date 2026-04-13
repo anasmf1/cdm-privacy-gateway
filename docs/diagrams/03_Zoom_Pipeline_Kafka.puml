@@ -1,0 +1,67 @@
+@startuml 03_Zoom_Pipeline_Kafka
+title Zoom ②③ — Ingestion CDC + Pipeline Kafka\nDe KONDOR+ à Iceberg Bronze
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundcorner 8
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantFontSize 12
+skinparam sequenceMessageFontSize 11
+skinparam noteBackgroundColor #FFF9E6
+
+participant "KONDOR+\nSQL Server" as KONDOR #EAF3FB
+participant "Debezium 2.5\n(CDC)" as DEB #E8F4E8
+participant "Schema Registry\n(Avro)" as SR #FFF9E6
+participant "Kafka\ntopic.raw" as KAFKA #FFE8E8
+participant "StreamGuard" as SG #FFD0D0
+participant "Kafka\ntopic.secure" as SEC #E8F4E8
+participant "Apache Flink\n1.19" as FLINK #F0E8FF
+database    "Iceberg\nBronze" as BRONZE #FFF9E6
+
+KONDOR -> KONDOR : INSERT INTO dbo.deals\nCDM-08547 | EUR/MAD | 10M MAD
+note right of KONDOR
+  CDC activé sur dbo.deals
+  EXEC sys.sp_cdc_enable_table
+end note
+
+KONDOR -> DEB    : CDC change event\n{op:"c", lsn:"0x0000A3", after:{deal}}
+activate DEB
+
+DEB    -> SR     : register Avro schema
+SR     --> DEB   : schema_id = 42
+
+DEB    -> KAFKA  : produce message\n{schema_id:42, payload:{deal brut}}
+deactivate DEB
+
+note right of KAFKA
+  Topic : cdm.sisdm.kondor.dbo.deals
+  Partition : hash(deal_id)
+  Retention : 7 jours
+end note
+
+KAFKA  -> SG     : consume offset=247
+activate SG
+SG     -> SEC    : publish pseudonymized\noffset=247
+deactivate SG
+
+SEC    -> FLINK  : consume topic.secure
+activate FLINK
+
+note right of FLINK
+  Flink Job : CDMStreamProcessor
+  Parallelism : 4
+  Checkpoint : 30s
+  State backend : RocksDB
+end note
+
+FLINK  -> BRONZE : write Iceberg Bronze\npartition=date(2026-04-10)
+FLINK  -> FLINK  : update watermark
+deactivate FLINK
+
+note over KONDOR, BRONZE
+  Latence end-to-end : < 5 secondes
+  KONDOR+ → Iceberg Bronze
+end note
+
+@enduml

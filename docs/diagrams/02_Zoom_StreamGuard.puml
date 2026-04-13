@@ -1,0 +1,68 @@
+@startuml 02_Zoom_StreamGuard
+title Zoom ④ — StreamGuard Privacy Layer\nContribution originale · Pattern ØllamØnym adapté CDM
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundcorner 8
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceParticipantFontSize 12
+skinparam sequenceMessageFontSize 11
+skinparam noteBackgroundColor #FFF9E6
+skinparam noteBorderColor #D4A017
+
+participant "Kafka\ntopic.raw"    as RAW   #FFE8E8
+participant "Consumer\n(consumer.py)" as CONS  #EAF3FB
+participant "Pseudonymizer\n(pseudonymizer.py)" as PSEUDO #FFD0D0
+participant "Producer\n(producer.py)" as PROD  #E8F4E8
+database    "Mapping\n(PostgreSQL)"   as MAP   #FFF9E6
+participant "Kafka\ntopic.secure"     as SEC   #E8F4E8
+participant "Kafka\ntopic.audit"      as AUD   #FFF9E6
+
+RAW   -> CONS   : deal brut\n{CDM-08547, TRADER_01, EUR/MAD, 10M}
+
+activate CONS
+CONS  -> PSEUDO : extract deal fields
+
+activate PSEUDO
+
+group Détection Hybride
+  PSEUDO -> PSEUDO : Regex patterns\nDEAL_ID · CCY · AMT · RATE · IBAN · SWIFT
+  note right : 8 patterns déterministes\n< 1ms par entité
+  PSEUDO -> PSEUDO : Qwen local\ncontrepartie · noms ambigus
+  note right : Qwen 2.5 7B Ollama\nContexte Capital Markets
+end
+
+group Génération Token HMAC-SHA256
+  PSEUDO -> PSEUDO : token = HMAC(secret, session+entity+value)
+  note right
+    CDM-08547  → DEAL_a3f9
+    TRADER_01  → TRADER_b2e1
+    Attijariwafa → ENTITY_c4d7
+    EUR/MAD    → CCY_ab12
+    10,000,000 → AMT_d1e2
+    10.9100    → RATE_e5f3
+    Session-stable · Irréversible
+  end note
+end
+
+PSEUDO -> MAP   : store {token → original, session_id, TTL:24h}
+MAP    --> PSEUDO : OK
+
+PSEUDO --> CONS : pseudonymized deal
+deactivate PSEUDO
+
+CONS -> PROD    : send pseudonymized deal
+deactivate CONS
+
+activate PROD
+PROD -> SEC     : publish topic.secure\n{DEAL_a3f9, TRADER_b2e1, CCY_ab12...}
+PROD -> AUD     : publish audit log\n{timestamp, nb_entities:6, BAM_N5_G_2022}
+deactivate PROD
+
+note over RAW, AUD
+  Latence totale StreamGuard : < 50ms par deal
+  Conformité : BAM N°5/G/2022
+end note
+
+@enduml

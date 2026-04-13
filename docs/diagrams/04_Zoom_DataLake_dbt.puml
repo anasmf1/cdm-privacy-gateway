@@ -1,0 +1,68 @@
+@startuml 04_Zoom_DataLake_dbt
+title Zoom ⑥⑦ — DataLake Iceberg + Transformations dbt\nBronze → Silver → Gold
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundcorner 8
+skinparam arrowThickness 1.5
+skinparam componentBorderThickness 1.2
+skinparam databaseBorderThickness 1.2
+skinparam noteFontSize 11
+skinparam noteBackgroundColor #FFF9E6
+
+database "Bronze Layer\ndeals_raw" as BRONZE #FFE8D0 {
+}
+note bottom of BRONZE
+  Données brutes pseudonymisées
+  Schema : deal_id, montant, taux,
+  devise, trader, contrepartie,
+  ts_bronze, partition_date
+  Source : Flink → Iceberg
+end note
+
+component "dbt Model\nbronze_to_silver.sql" as DBT1 #E8F4E8
+
+database "Silver Layer\ndeals_clean\nanomalies" as SILVER #FFF0D0 {
+}
+note bottom of SILVER
+  Données nettoyées + enrichies
+  + scores ML Isolation Forest
+  deals_clean : validés uniquement
+  anomalies : score < -0.75
+end note
+
+component "dbt Model\nsilver_to_gold.sql" as DBT2 #E8F4E8
+
+database "Gold Layer\npositions_nettes\npnl_journalier\nmtm_intraday" as GOLD #E8FFE8 {
+}
+note bottom of GOLD
+  Agrégats métier
+  positions_nettes : SUM par devise
+  pnl_journalier : P&L cumulé/jour
+  mtm_intraday : mark-to-market live
+end note
+
+component "Dremio\nSQL Engine" as DREMIO #EAF3FB
+component "Power BI\n(ODBC)" as PBI #FFE8E8
+component "Dashboard\nNext.js" as DASH #EAF3FB
+
+BRONZE -down-> DBT1  : dbt run
+DBT1   -down-> SILVER : cleaned + ML scores\nFiltres : statut=CONFIRMED\nEnrichissement : anomaly_score
+
+SILVER -down-> DBT2  : dbt run
+DBT2   -down-> GOLD  : aggregate positions\nSUM(montant) GROUP BY devise\nSUM(pnl) GROUP BY date
+
+GOLD   -right-> DREMIO : DirectQuery
+DREMIO -right-> PBI    : ODBC connector\nport 31010
+DREMIO -down-> DASH    : REST API
+
+note right of DBT2
+  Tests dbt automatiques :
+  - not_null(deal_id)
+  - unique(deal_id)
+  - accepted_values(statut)
+  - anomaly_score entre -1 et 0
+end note
+
+@enduml

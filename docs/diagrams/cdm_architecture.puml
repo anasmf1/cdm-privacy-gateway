@@ -1,0 +1,178 @@
+@startuml CDM_Architecture_Component
+
+title CDM StreamGuard — Architecture Cible\nCrédit du Maroc DSIG — PFE Roui Anas 2026
+
+skinparam backgroundColor #FAFAFA
+skinparam roundcorner 10
+skinparam componentFontSize 12
+skinparam componentFontStyle bold
+skinparam componentBorderThickness 1.5
+skinparam arrowThickness 1.5
+skinparam arrowFontSize 10
+skinparam noteFontSize 11
+skinparam noteBackgroundColor #FFF9E6
+skinparam packageFontSize 13
+skinparam packageFontStyle bold
+
+skinparam component {
+  BackgroundColor #EAF3FB
+  BorderColor #1A66D4
+  FontColor #003087
+}
+
+skinparam database {
+  BackgroundColor #FFF9E6
+  BorderColor #D4A017
+  FontColor #412402
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE SOURCE
+' ════════════════════════════════════════════════════
+
+package "Sources de données" #E8F0FB {
+  component "KONDOR+\n(FIS)" as KONDOR
+  component "Oracle ARPSON\n(Réconciliation)" as ARPSON
+  note bottom of KONDOR
+    SQL Server
+    CDC activé
+    dbo.deals
+  end note
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE INGESTION
+' ════════════════════════════════════════════════════
+
+package "Ingestion — CDC" #E8F4E8 {
+  component "Debezium\n2.5" as DEB
+  component "Schema Registry\n(Avro)" as SR
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE MESSAGERIE
+' ════════════════════════════════════════════════════
+
+package "Messagerie — Apache Kafka" #FFF0F0 {
+  component "topic.raw\n(deals bruts)" as KAFKA_RAW  #FFE8E8
+  component "topic.secure\n(deals pseudonymisés)" as KAFKA_SEC  #E8F4E8
+  component "topic.audit\n(logs BAM)" as KAFKA_AUD  #FFF9E6
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE PRIVACY — STREAMGUARD
+' ════════════════════════════════════════════════════
+
+package "StreamGuard — Privacy Gateway" #FFF0F0 {
+  component "Consumer\n(Kafka Reader)" as CONS
+  component "Pseudonymizer\n(Regex + Qwen)" as PSEUDO  #FFE8E8
+  component "Producer\n(Kafka Writer)" as PROD
+  database  "Mapping Table\n(PostgreSQL)" as MAPPING  #FFF9E6
+
+  CONS --> PSEUDO : deal brut
+  PSEUDO --> PROD : deal pseudonymisé
+  PSEUDO --> MAPPING : store token↔original
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE STREAM PROCESSING
+' ════════════════════════════════════════════════════
+
+package "Stream Processing" #E8F4E8 {
+  component "Apache Flink\n1.19" as FLINK
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE DATALAKE
+' ════════════════════════════════════════════════════
+
+package "DataLake — Apache Iceberg" #FFF9E6 {
+  database "Bronze Layer\n(raw deals)" as BRONZE
+  database "Silver Layer\n(cleaned + ML)" as SILVER
+  database "Gold Layer\n(positions + PNL)" as GOLD
+
+  BRONZE --> SILVER : dbt transform
+  SILVER --> GOLD : dbt aggregate
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE QUERY
+' ════════════════════════════════════════════════════
+
+package "Query Engine" #E8F0FB {
+  component "Dremio\n24.3" as DREMIO
+  note right of DREMIO
+    SQL sur Iceberg
+    Connexion Power BI
+    REST API
+  end note
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE ML
+' ════════════════════════════════════════════════════
+
+package "Machine Learning" #F0E8FF {
+  component "Isolation Forest\n(Scikit-learn)" as IF
+  component "Autoencoder\n(PyTorch)" as AE
+  component "MLflow\n(Tracking)" as MLFLOW
+
+  IF --> MLFLOW : log metrics
+  AE --> MLFLOW : log metrics
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE IA
+' ════════════════════════════════════════════════════
+
+package "LLM — Local & Cloud" #F5F0FF {
+  component "Qwen 2.5 7B\n(Ollama — local)" as QWEN   #EEE8FF
+  component "Claude API\n(via StreamGuard)" as CLAUDE  #E8E0FF
+  component "GPT-4o\n(via StreamGuard)" as GPT4       #E8E0FF
+  note bottom of QWEN
+    On-premise
+    Zéro cloud
+    BAM compliant
+  end note
+}
+
+' ════════════════════════════════════════════════════
+' COUCHE APPLICATION
+' ════════════════════════════════════════════════════
+
+package "Application" #E8F0FB {
+  component "FastAPI\n(Backend)" as API
+  component "Next.js\n(Dashboard)" as FRONT
+  component "CDM Desk\n(Assistant IA)" as CHAT
+}
+
+' ════════════════════════════════════════════════════
+' CONNEXIONS PRINCIPALES
+' ════════════════════════════════════════════════════
+
+KONDOR  --> DEB      : CDC events
+ARPSON  --> DEB      : CDC events
+DEB     --> SR       : schema registration
+DEB     --> KAFKA_RAW : publish raw deals
+
+KAFKA_RAW --> CONS   : consume
+PROD    --> KAFKA_SEC : publish secure
+PROD    --> KAFKA_AUD : publish audit
+
+KAFKA_SEC --> FLINK  : consume secure stream
+FLINK   --> BRONZE   : write Bronze
+
+SILVER  --> IF       : anomaly detection
+SILVER  --> AE       : anomaly detection
+
+GOLD    --> DREMIO   : SQL queries
+DREMIO  --> API      : REST results
+
+API     --> FRONT    : WebSocket + REST
+API     --> CHAT     : AI responses
+CHAT    --> QWEN     : Text-to-SQL (local)
+CHAT    --> CLAUDE   : Text-to-SQL (cloud)
+CHAT    --> GPT4     : Text-to-SQL (cloud)
+MAPPING --> API      : depseudonymize
+
+@enduml

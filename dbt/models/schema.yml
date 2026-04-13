@@ -1,0 +1,130 @@
+version: 2
+
+# ── SOURCES ───────────────────────────────────────────────────
+sources:
+  - name: bronze
+    database: cdm_datalake
+    schema: bronze
+    description: "Données brutes pseudonymisées depuis Kafka via Apache Flink"
+    tables:
+      - name: deals_raw
+        description: "Deals KONDOR+ pseudonymisés par StreamGuard"
+        columns:
+          - name: deal_id
+            description: "Token pseudonymisé du deal (ex: DEAL_a3f9)"
+            tests:
+              - not_null
+              - unique
+          - name: montant
+            description: "Montant pseudonymisé du deal"
+            tests:
+              - not_null
+          - name: taux
+            description: "Taux de change pseudonymisé"
+            tests:
+              - not_null
+          - name: devise
+            description: "Paire de devises pseudonymisée (ex: CCY_ab12)"
+            tests:
+              - not_null
+          - name: statut
+            description: "Statut du deal"
+            tests:
+              - accepted_values:
+                  values: ['CONFIRMED', 'SETTLED', 'PENDING', 'CANCELLED']
+
+# ── MODELS ────────────────────────────────────────────────────
+models:
+
+  # ── BRONZE ──────────────────────────────────────────────────
+  - name: bronze_deals_raw
+    description: "Deals KONDOR+ bruts pseudonymisés — Bronze Layer"
+    columns:
+      - name: deal_id
+        tests: [not_null, unique]
+      - name: montant
+        tests: [not_null]
+      - name: taux
+        tests: [not_null]
+      - name: devise
+        tests: [not_null]
+
+  # ── SILVER ──────────────────────────────────────────────────
+  - name: silver_deals_clean
+    description: "Deals validés et enrichis avec features ML — Silver Layer"
+    columns:
+      - name: deal_id
+        tests: [not_null, unique]
+      - name: montant
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "montant > 0"
+      - name: taux
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "taux > 0"
+      - name: statut
+        tests:
+          - accepted_values:
+              values: ['CONFIRMED', 'SETTLED']
+      - name: hors_heures
+        tests:
+          - accepted_values:
+              values: [0, 1]
+
+  - name: silver_anomalies
+    description: "Anomalies détectées par règles métier et Isolation Forest"
+    columns:
+      - name: deal_id
+        tests: [not_null]
+      - name: score
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "score >= -1 AND score <= 0"
+      - name: anomaly_type
+        tests:
+          - accepted_values:
+              values: [
+                'RATE_OUTLIER',
+                'AMOUNT_OUTLIER',
+                'OFF_HOURS',
+                'ML_ISOLATION_FOREST',
+                'MULTIVARIATE_OUTLIER'
+              ]
+      - name: detection_method
+        tests:
+          - accepted_values:
+              values: ['RULE_BASED', 'ISOLATION_FOREST']
+
+  # ── GOLD ────────────────────────────────────────────────────
+  - name: gold_positions_nettes
+    description: "Positions nettes par devise — Gold Layer"
+    columns:
+      - name: devise
+        tests: [not_null, unique]
+      - name: position_mad
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "position_mad >= 0"
+      - name: nb_deals
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "nb_deals > 0"
+
+  - name: gold_pnl_journalier
+    description: "P&L journalier par devise — Gold Layer"
+    columns:
+      - name: date_trade
+        tests: [not_null]
+      - name: devise
+        tests: [not_null]
+      - name: volume_total
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: "volume_total > 0"

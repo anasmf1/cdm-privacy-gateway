@@ -1,0 +1,23 @@
+cdm_dremio:
+  target: dev
+  outputs:
+    dev:
+      type: dremio
+      object_storage_source: cdm_datalake
+      object_storage_path: cdm
+      datalake_format: iceberg
+      host: localhost
+      port: 9047
+      user: cdm_user
+      password: CDM_Dremio_2026!
+      use_ssl: false
+    prod:
+      type: dremio
+      object_storage_source: cdm_datalake
+      object_storage_path: cdm
+      datalake_format: iceberg
+      host: "{{ env_var('DREMIO_HOST') }}"
+      port: 9047
+      user: "{{ env_var('DREMIO_USER') }}"
+      password: "{{ env_var('DREMIO_PASSWORD') }}"
+      use_ssl: false
